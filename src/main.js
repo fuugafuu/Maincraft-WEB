@@ -19,6 +19,8 @@ const BLOCKS = [
   {id:'leaves',name:'葉',color:0x3c8140,transparent:true},
   {id:'planks',name:'オークの板材',color:0xbc8e52},
   {id:'crafting_table',name:'作業台',color:0xa67843},
+  {id:'furnace',name:'かまど',color:0x787878},
+  {id:'chest',name:'チェスト',color:0xa67a47},
   {id:'glass',name:'ガラス',color:0xb8e7e9,transparent:true},
   {id:'bricks',name:'レンガ',color:0xa55445},
   {id:'cobble',name:'丸石',color:0x777e7b},
@@ -37,15 +39,17 @@ const FOODS = [
 ];
 const byId = Object.fromEntries(BLOCKS.map(b=>[b.id,b]));
 const foodById=Object.fromEntries(FOODS.map(food=>[food.id,food]));
+const AIR = 'air', SEA = 9, CHUNK = 16, RADIUS = isTouchDevice ? 1 : 2;
 const CRAFTING_RECIPES=[
   {id:'planks',name:'オークの板材 ×4',pattern:['wood'],amount:4},
   {id:'crafting_table',name:'作業台',pattern:['planks','planks','planks','planks'],amount:1},
+  {id:'furnace',name:'かまど',pattern:['cobble','cobble','cobble','cobble',AIR,'cobble','cobble','cobble','cobble'],amount:1},
+  {id:'chest',name:'チェスト',pattern:['planks','planks','planks','planks',AIR,'planks','planks','planks','planks'],amount:1},
 ];
 const WORLD_INDEX_KEY = 'maincraft.world.index';
 const WORLD_PREFIX = 'maincraft.world.';
 let worldId = null;
 let javaResources = null;
-const AIR = 'air', SEA = 9, CHUNK = 16, RADIUS = isTouchDevice ? 1 : 2;
 const app = document.getElementById('app');
 app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><label for="javajar">Minecraft 1.21.11 Java Client (.jar)</label><input id="javajar" class="field" type="file" accept=".jar,.zip,application/java-archive"><div id="assetstatus" class="assetstatus">Optional: load textures and models from your own installation, locally in your browser.</div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobtop"><button data-action="pause" aria-label="メニュー">☰</button><button data-action="chat" aria-label="チャットとコマンド">⌨</button><button data-action="fly" aria-label="飛行切り替え">飛行</button></div><div class="mobgroup"><span></span><button data-key="KeyW" aria-label="前進">▲</button><span></span><button data-key="KeyA" aria-label="左移動">◀</button><button data-key="KeyS" aria-label="後退">▼</button><button data-key="KeyD" aria-label="右移動">▶</button></div><div class="mobactions"><button data-key="ControlLeft" aria-label="下降">↓</button><button data-key="Space" aria-label="ジャンプ・上昇">↑</button><button data-action="break" aria-label="破壊">⛏</button><button data-action="place" aria-label="設置">▣</button><button data-action="inventory" aria-label="インベントリ">▦</button></div><div class="mobhint">画面をスワイプして視点移動</div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><input id="itemsearch" class="field" placeholder="Search blocks / ブロック検索" autocomplete="off"><div id="itemcount" class="itemcount"></div><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="loadassets">Load Java 1.21.11 textures</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
 const $=s=>document.querySelector(s);
@@ -118,7 +122,7 @@ function updateRain(dt){
   rainGeometry.attributes.position.needsUpdate=true;
 }
 let seed=1,seed64='1',seedString='',worldgenVersion=1,worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,doDaylightCycle=true,spawnPosition=null;
-let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),storageSlots=Array(27).fill(AIR),storageCounts=Array(27).fill(0),inventorySelection=null,craftGrid=Array(4).fill(AIR),selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
+let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),storageSlots=Array(27).fill(AIR),storageCounts=Array(27).fill(0),inventorySelection=null,craftGrid=Array(4).fill(AIR),craftingTableOpen=false,selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 let playerHealth=20,playerDamageCooldown=0,fallDistance=0;
 let foodLevel=20,foodSaturation=5,foodExhaustion=0,foodTimer=0;
 const healthHud=document.createElement('div');
@@ -768,14 +772,15 @@ function addInventoryItem(id,quantity=1){
   return remaining===0;
 }
 function craftingResult(){
-  const occupied=craftGrid.map((id,index)=>id===AIR?null:[index%2,Math.floor(index/2),id]).filter(Boolean);
+  const width=craftingTableOpen?3:2;
+  const occupied=craftGrid.map((id,index)=>id===AIR?null:[index%width,Math.floor(index/width),id]).filter(Boolean);
   if(!occupied.length)return null;
   const minX=Math.min(...occupied.map(([x])=>x));
   const minY=Math.min(...occupied.map(([,y])=>y));
   const maxX=Math.max(...occupied.map(([x])=>x));
   const maxY=Math.max(...occupied.map(([,y])=>y));
   const pattern=[];
-  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++)pattern.push(craftGrid[y*2+x]);
+  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++)pattern.push(craftGrid[y*width+x]);
   return CRAFTING_RECIPES.find(recipe=>recipe.pattern.length===pattern.length&&recipe.pattern.every((id,i)=>id===pattern[i]))??null;
 }
 function craftRecipe(recipe){
@@ -834,7 +839,7 @@ function renderInventory(query=''){
     const crafting=$('#crafting');
     crafting.classList.remove('hidden');
     const result=craftingResult();
-    crafting.innerHTML=`<h3>2×2 クラフト</h3><p>持ち物を選び、マスをタップすると材料を1個置きます。マスをもう一度タップすると戻せます。</p><div class="craft-layout"><div class="craft-grid">${craftGrid.map((id,i)=>{
+    crafting.innerHTML=`<h3>${craftingTableOpen?'3×3 作業台':'2×2 クラフト'}</h3><p>持ち物を選び、マスをタップすると材料を1個置きます。マスをもう一度タップすると戻せます。</p><div class="craft-layout"><div class="craft-grid ${craftingTableOpen?'craft-grid-large':''}">${craftGrid.map((id,i)=>{
       const item=byId[id]??foodById[id];
       return `<button class="craft-cell ${id!==AIR?'filled':''}" data-grid="${i}" aria-label="クラフト ${i+1} ${item?.name??'空'}">${item?.name??'＋'}</button>`;
     }).join('')}</div><span class="craft-arrow">→</span><button id="craft-result" ${result?'':'disabled'}>${result?.name??'完成品'}</button></div>`;
@@ -875,7 +880,14 @@ function renderInventory(query=''){
     if(!foodById[id])await ensureJavaBlock(id);
   });
 }
-function openInventory(){
+function openInventory(useTable=false){
+  if(inventoryOpen)return;
+  if(craftGrid.some(id=>id!==AIR)&&!returnCraftGrid()){
+    notice('クラフト材料を戻す空きがありません');
+    return;
+  }
+  craftingTableOpen=mode==='survival'&&useTable;
+  craftGrid=Array(craftingTableOpen?9:4).fill(AIR);
   inventoryOpen=true;
   inventorySelection=null;
   document.exitPointerLock?.();
@@ -892,6 +904,8 @@ $('#itemsearch').addEventListener('input',e=>renderInventory(e.target.value.trim
 function closeInventory(){
   if(mode==='survival'&&!returnCraftGrid()){notice('クラフト材料を戻す空きがありません');return}
   inventoryOpen=false;
+  craftingTableOpen=false;
+  craftGrid=Array(4).fill(AIR);
   $('#inventory').classList.add('hidden');
   renderHotbar();scheduleSave();
   if(active&&!paused)lockPointer();
@@ -924,6 +938,13 @@ function interact(place){
     return;
   }
   const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld).round();
+  if(place&&mode==='survival'){
+    const selectedPoint=hit.point.clone().addScaledVector(normal,-.025);
+    if(getBlock(selectedPoint.x,selectedPoint.y,selectedPoint.z)==='crafting_table'){
+      openInventory(true);
+      return;
+    }
+  }
   const p=hit.point.clone().addScaledVector(normal,place?.025:-.025);
   if(place)p.copy(hit.point).addScaledVector(normal,.025);
   const x=Math.floor(p.x),y=Math.floor(p.y),z=Math.floor(p.z);
