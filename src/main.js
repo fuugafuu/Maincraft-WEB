@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 import { loadJavaResources } from './javaAssets.js';
 import './style.css';
 
@@ -42,6 +43,30 @@ const sun=new THREE.DirectionalLight(0xfff1ca,2.6);sun.position.set(50,80,30);su
 scene.add(new THREE.HemisphereLight(0xd0ecff,0x4b5039,2));
 const waterMaterial=new THREE.MeshPhysicalMaterial({color:0x3b8cbb,transparent:true,opacity:.72,roughness:.13,metalness:.14,clearcoat:1,clearcoatRoughness:.04,side:THREE.DoubleSide,depthWrite:false});
 const water=new THREE.Mesh(new THREE.PlaneGeometry(250,250,1,1),waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=SEA+.14;scene.add(water);
+// Render the reflected scene at reduced resolution on desktop GPUs.
+// Mobile uses the lightweight physical material to keep touch controls responsive.
+let reflectedWater=null;
+if(!isTouchDevice){
+  const shader={
+    ...Reflector.ReflectorShader,
+    uniforms:{...Reflector.ReflectorShader.uniforms,time:{value:0}},
+    fragmentShader:Reflector.ReflectorShader.fragmentShader
+      .replace('uniform sampler2D tDiffuse;','uniform sampler2D tDiffuse;\n uniform float time;')
+      .replace('vec4 base = texture2DProj( tDiffuse, vUv );',
+        'vec4 rippleUv = vUv;\n rippleUv.xy += vec2(sin(vUv.x * 36.0 / vUv.w + time * 0.6), cos(vUv.y * 29.0 / vUv.w + time * 0.48)) * 0.0015 * vUv.w;\n vec4 base = texture2DProj( tDiffuse, rippleUv );')
+      .replace('vec4( blendOverlay( base.rgb, color ), 1.0 )',
+        'vec4( mix(base.rgb, color, 0.45), 0.76 )')
+  };
+  reflectedWater=new Reflector(new THREE.PlaneGeometry(250,250),{
+    shader,textureWidth:512,textureHeight:512,multisample:0,clipBias:0.003,color:0x3b8cbb
+  });
+  reflectedWater.rotation.x=-Math.PI/2;
+  reflectedWater.position.y=SEA+.145;
+  reflectedWater.material.transparent=true;
+  reflectedWater.material.depthWrite=false;
+  scene.add(reflectedWater);
+  water.visible=false;
+}
 const skyClouds=new THREE.Group();scene.add(skyClouds);
 for(let i=0;i<36;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(10+Math.random()*13,.65,4+Math.random()*5),new THREE.MeshBasicMaterial({color:0xf9f9f0,transparent:true,opacity:.74,depthWrite:false}));c.position.set(Math.random()*270-135,52+Math.random()*8,Math.random()*270-135);skyClouds.add(c)}
 const chunkGroup=new THREE.Group();scene.add(chunkGroup);
@@ -235,6 +260,7 @@ function updateChunks(){
     }
   }
   water.position.x=cx*CHUNK;water.position.z=cz*CHUNK;
+  if(reflectedWater){reflectedWater.position.x=water.position.x;reflectedWater.position.z=water.position.z}
   sun.position.set(location.x+50,80,location.z+30);
   sun.target.position.set(location.x,0,location.z);
   sun.target.updateMatrixWorld();
@@ -527,7 +553,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
   }
   case 'locate':chat('構造物の探索は今後実装予定です');break;
   default:chat(`不明なコマンド: /${cmd}。/help を参照してください`)} }
-function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.cos(a);sun.position.set(location.x+Math.sin(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
+function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.cos(a);sun.position.set(location.x+Math.sin(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
 if(isTouchDevice){
   let lookPointer=null;
   let previousX=0,previousY=0;
@@ -586,6 +612,6 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
       moveVertical(vy*dt);
       if(vy===0&&playerCollides(location.x,location.y-.025,location.z))grounded=true;
     }
-    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();skyClouds.position.x+=dt*.35;water.material.opacity=.70+Math.sin(now*.0018)*.04;second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed}`}}renderer.render(scene,camera)}
+    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();skyClouds.position.x+=dt*.35;water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed}`}}renderer.render(scene,camera)}
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});requestAnimationFrame(animate);
 window.addEventListener('beforeunload',saveData);
