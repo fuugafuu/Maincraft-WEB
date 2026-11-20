@@ -1099,7 +1099,7 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked] [normal|force|move] /give block /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;fallDistance=0;grounded=false;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
@@ -1121,20 +1121,29 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     chat(`${changed.length} ブロックを変更しました`);break;
   }
   case 'clone':{
-    const a=xyz(),b=xyz(3),dest=xyz(6);
-    if(!inWorld(a)||!inWorld(b)||!inWorld(dest)){chat('使用法 /clone x1 y1 z1 x2 y2 z2 x y z');break}
+    const a=xyz(),b=xyz(3),dest=xyz(6),mask=parts[9]||'replace',cloneMode=parts[10]||'normal';
+    if(!inWorld(a)||!inWorld(b)||!inWorld(dest)||!['replace','masked'].includes(mask)||!['normal','force','move'].includes(cloneMode)||parts.length>11){
+      chat('使用法 /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked] [normal|force|move]');break;
+    }
     if(volume(a,b)>4096){chat('一度に複製できるのは4096ブロックまでです');break}
     const ranges=bounds(a,b),size=ranges.map(([min,max])=>max-min+1);
     if(dest[1]+size[1]-1>100){chat('複製先がワールドの高さを超えています');break}
+    const overlaps=ranges.every(([min,max],i)=>dest[i]<=max&&dest[i]+size[i]-1>=min);
+    if(overlaps&&cloneMode==='normal'){chat('コピー元とコピー先が重なっています（force または move を指定してください）');break}
     const source=[];
     for(let dx=0;dx<size[0];dx++)for(let dz=0;dz<size[2];dz++)for(let dy=0;dy<size[1];dy++){
       const sourceX=ranges[0][0]+dx,sourceY=ranges[1][0]+dy,sourceZ=ranges[2][0]+dz;
       const id=getBlock(sourceX,sourceY,sourceZ);
+      if(mask==='masked'&&id===AIR)continue;
       const chest=id==='chest'?chestContents.get(key(sourceX,sourceY,sourceZ)):null;
-      source.push([dest[0]+dx,dest[1]+dy,dest[2]+dz,id,chest?{items:[...chest.items],counts:[...chest.counts]}:null]);
+      source.push([sourceX,sourceY,sourceZ,dest[0]+dx,dest[1]+dy,dest[2]+dz,id,chest?{items:[...chest.items],counts:[...chest.counts]}:null]);
     }
     const changed=[],usedBlocks=new Set();
-    for(const [x,y,z,id,chest] of source){
+    if(cloneMode==='move')for(const [x,y,z] of source){
+      writeBlock(x,y,z,AIR);
+      changed.push([x,y,z]);
+    }
+    for(const [, , ,x,y,z,id,chest] of source){
       const destinationKey=key(x,y,z);
       if(getBlock(x,y,z)===id&&id!=='chest')continue;
       writeBlock(x,y,z,id);
