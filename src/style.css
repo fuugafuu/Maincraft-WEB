@@ -67,6 +67,9 @@ html,body,#app,#game{overscroll-behavior:none}
 .world-export{flex:none;border:1px solid #ffffff35;border-radius:8px;color:#e6f0e5;background:#ffffff12;padding:8px;font-size:12px}
 .world-export:hover,.world-export:focus-visible{background:#ffffff30}
 .itemcount{font-size:12px;color:#b5ccbc;padding:8px 0}
+.creative-pages{display:flex;gap:8px;margin-top:8px}
+.creative-pages button{flex:1;padding:9px;border:1px solid #ffffff50;border-radius:7px;background:#ffffff18;color:#fff}
+.creative-pages button:disabled{opacity:.35;cursor:default}
 #itemsearch{margin:8px 0}
 #menu{overflow-y:auto;padding:12px 0}
 .menu-card{max-height:calc(100dvh - 24px);overflow-y:auto;scrollbar-width:thin}

@@ -904,6 +904,8 @@ function inventorySlot(index){
   const chest=chestSlots();
   return chest?[chest.items,chest.counts,index-36]:null;
 }
+let creativePage=0;
+const CREATIVE_PAGE_SIZE=120;
 function renderInventory(query=''){
   if(mode==='survival'){
     const cells=[...storageSlots,...slots];
@@ -991,8 +993,18 @@ function renderInventory(query=''){
   }
   $('#crafting').classList.add('hidden');
   const matches=[...BLOCKS.filter(b=>b.id!=='bedrock'),...FOODS,...ITEMS].filter(b=>b.id.includes(query.toLowerCase())||b.name.includes(query));
-  $('#itemcount').textContent=`${matches.length} items · displaying ${Math.min(matches.length,120)}`;
-  $('#items').innerHTML=matches.slice(0,120).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="${itemStyle(b.id)}"></i>${b.name}</button>`).join('');
+  const pageCount=Math.max(1,Math.ceil(matches.length/CREATIVE_PAGE_SIZE));
+  creativePage=Math.min(creativePage,pageCount-1);
+  const start=creativePage*CREATIVE_PAGE_SIZE;
+  $('#itemcount').innerHTML=`<span>${matches.length} items · ${matches.length?start+1:0}–${Math.min(start+CREATIVE_PAGE_SIZE,matches.length)} / ${pageCount} ページ</span><div class="creative-pages"><button id="previous-items" ${creativePage===0?'disabled':''}>前へ</button><button id="next-items" ${creativePage===pageCount-1?'disabled':''}>次へ</button></div>`;
+  const changePage=delta=>{
+    creativePage+=delta;
+    renderInventory(query);
+    $('.inventory-panel').scrollTop=0;
+  };
+  $('#previous-items').onclick=()=>changePage(-1);
+  $('#next-items').onclick=()=>changePage(1);
+  $('#items').innerHTML=matches.slice(start,start+CREATIVE_PAGE_SIZE).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="${itemStyle(b.id)}"></i>${b.name}</button>`).join('');
   $$('.item-tile').forEach(el=>el.onclick=async()=>{
     const id=el.dataset.id;
     slots[selected]=id;
@@ -1024,6 +1036,7 @@ function openInventory(useTable=false){
   $('#inventory p').textContent=mode==='survival'?'持ち物とホットバーのアイテムを入れ替えます。':'選択するとホットバーの現在のスロットにセットします。';
   $('#itemsearch').classList.toggle('hidden',mode==='survival');
   $('#itemsearch').value='';
+  creativePage=0;
   renderInventory();
   if(!isTouchDevice)$('#itemsearch').focus();
 }
@@ -1035,7 +1048,7 @@ function openChest(x,y,z){
   $('#inventory p').textContent='持ち物とチェストのマスを順に選ぶとアイテムを移動できます。';
   renderInventory();
 }
-$('#itemsearch').addEventListener('input',e=>renderInventory(e.target.value.trim()));
+$('#itemsearch').addEventListener('input',e=>{creativePage=0;renderInventory(e.target.value.trim())});
 function closeInventory(){
   if(mode==='survival'&&!returnCraftGrid()){notice('クラフト材料を戻す空きがありません');return}
   inventoryOpen=false;
