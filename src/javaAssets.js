@@ -80,6 +80,7 @@ export async function loadJavaResources(file, progress = () => {}) {
     filter: entry => entry.name === 'version.json'
       || entry.name.startsWith(prefix + 'blockstates/')
       || entry.name.startsWith(prefix + 'models/block/')
+      || entry.name.startsWith(prefix + 'models/item/')
       || entry.name.startsWith(prefix + 'textures/block/')
       || entry.name.startsWith(prefix + 'items/')
       || entry.name.startsWith(prefix + 'textures/item/'),
@@ -99,10 +100,35 @@ export async function loadJavaResources(file, progress = () => {}) {
     .map(n => n.slice((prefix + 'items/').length, -5))
     .sort();
   const iconUrls = new Map();
+  function readItemModelTexture(modelName, visited = new Set()) {
+    const name = modelName?.replace(/^minecraft:/, '');
+    if (!name || visited.has(name)) return null;
+    visited.add(name);
+    const raw = readJson(prefix + 'models/' + name + '.json');
+    if (!raw) return null;
+    let texture = raw.textures?.layer0 || raw.textures?.particle;
+    for (let i = 0; texture?.startsWith('#') && i < 12; i++) {
+      texture = raw.textures?.[texture.slice(1)];
+    }
+    if (texture && !texture.startsWith('#')) return texture.replace(/^minecraft:/, '');
+    return readItemModelTexture(raw.parent, visited);
+  }
+  function itemModelReference(node) {
+    if (!node || typeof node !== 'object') return null;
+    if (node.type === 'minecraft:model') return node.model;
+    // A static preview uses the default state of conditional item models.
+    return itemModelReference(node.on_false)
+      || itemModelReference(node.fallback)
+      || itemModelReference(node.entries?.[0]?.model)
+      || itemModelReference(node.cases?.[0]?.model)
+      || itemModelReference(node.models?.[0]?.model);
+  }
   function itemIcon(id) {
     const actual = aliases[id] || id;
     if (iconUrls.has(actual)) return iconUrls.get(actual);
-    const candidates = [`item/${actual}`, `block/${actual}`, `block/${actual}_top`, `block/${actual}_side`];
+    const itemDefinition = readJson(prefix + 'items/' + actual + '.json');
+    const modelTexture = readItemModelTexture(itemModelReference(itemDefinition?.model));
+    const candidates = [modelTexture, `item/${actual}`, `block/${actual}`, `block/${actual}_top`, `block/${actual}_side`].filter(Boolean);
     const path = candidates.find(name => archive[prefix + 'textures/' + name + '.png']);
     if (!path) return null;
     const url = URL.createObjectURL(new Blob([archive[prefix + 'textures/' + path + '.png']], {type:'image/png'}));
