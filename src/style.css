@@ -53,3 +53,5 @@ html,body,#app,#game{overscroll-behavior:none}
 @media(pointer:coarse){#menu{align-items:center}.menu-card{max-height:calc(100dvh - 24px)}}
 
 #health{font-size:22px;font-weight:800;color:#ff6868;text-shadow:1px 2px 3px #000;letter-spacing:2px;margin-bottom:8px;white-space:nowrap}
+
+#hunger{font-size:17px;font-weight:750;color:#e9ac51;text-shadow:1px 2px 3px #000;letter-spacing:2px;margin-bottom:8px;white-space:nowrap}
