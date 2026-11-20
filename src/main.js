@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { configureRenderer, createSky, makeTerrainMaterial, makeWaterMaterial } from './renderPipeline.js';
 import { loadJavaResources } from './javaAssets.js';
+import { rememberJavaJar, recallJavaJar } from './javaJarStore.js';
 import { MobWorld } from './mobs.js';
 import './style.css';
 
@@ -67,12 +69,14 @@ $('#worldlist').insertAdjacentHTML('afterend','<button class="secondary" id="imp
 $('#save').insertAdjacentHTML('afterend','<button class="secondary" id="exportworld">ワールドを書き出す（JSON）</button>');
 const game=$('#game'), canvas=document.createElement('canvas');
 const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(devicePixelRatio,isTouchDevice ? 1.5 : 2)); renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.24;game.appendChild(renderer.domElement);
+configureRenderer(renderer,isTouchDevice);renderer.setSize(innerWidth,innerHeight);game.appendChild(renderer.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x8bc3e4);scene.fog=new THREE.Fog(0x8bc3e4,45,130);
+const atmosphere=createSky(scene);
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,250);
 const sun=new THREE.DirectionalLight(0xfff1ca,2.6);sun.position.set(50,80,30);sun.castShadow=true;sun.shadow.mapSize.set(isTouchDevice ? 1024 : 2048,isTouchDevice ? 1024 : 2048);sun.shadow.camera.left=-85;sun.shadow.camera.right=85;sun.shadow.camera.top=85;sun.shadow.camera.bottom=-85;sun.shadow.camera.near=1;sun.shadow.camera.far=250;sun.shadow.bias=-.0007;scene.add(sun,sun.target);
 scene.add(new THREE.HemisphereLight(0xd0ecff,0x4b5039,2));
-const waterMaterial=new THREE.MeshPhysicalMaterial({color:0x3b8cbb,transparent:true,opacity:.72,roughness:.13,metalness:.14,clearcoat:1,clearcoatRoughness:.04,side:THREE.DoubleSide,depthWrite:false});
+const waterSurface=makeWaterMaterial();
+const waterMaterial=waterSurface.material;
 const water=new THREE.Mesh(new THREE.BufferGeometry(),waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=SEA+.14;scene.add(water);
 // Render the reflected scene at reduced resolution on desktop GPUs.
 // Mobile uses the lightweight physical material to keep touch controls responsive.
@@ -134,6 +138,8 @@ let seed=1,seed64='1',seedString='',worldgenVersion=1,worldName='',mode='creativ
 let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),storageSlots=Array(27).fill(AIR),storageCounts=Array(27).fill(0),inventorySelection=null,craftGrid=Array(4).fill(AIR),craftingTableOpen=false,selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 let chestContents=new Map(),openChestKey=null;
 let playerHealth=20,playerDamageCooldown=0,fallDistance=0;
+const DIFFICULTIES=['peaceful','easy','normal','hard'];
+let difficulty='normal';
 let experienceTotal=0;
 function xpAtLevel(level){
   if(level<=16)return level*level+6*level;
@@ -217,6 +223,14 @@ function eatSelectedFood(){
 }
 function updateHunger(dt,isMoving,isSprinting){
   if(mode!=='survival')return;
+  if(difficulty==='peaceful'){
+    if(foodLevel!==20||foodSaturation!==5||foodExhaustion!==0){
+      foodLevel=20;foodSaturation=5;foodExhaustion=0;updateHealthHud();scheduleSave();
+    }
+    foodTimer+=dt;
+    if(foodTimer>=1&&playerHealth<20){foodTimer=0;playerHealth=Math.min(20,playerHealth+1);updateHealthHud();scheduleSave()}
+    return;
+  }
   if(isMoving)foodExhaustion+=dt*(isSprinting?1:.054);
   if(foodExhaustion>=4){
     const lost=Math.floor(foodExhaustion/4);
@@ -234,7 +248,7 @@ function updateHunger(dt,isMoving,isSprinting){
     playerHealth=Math.min(20,playerHealth+1);
     foodExhaustion+=6;
     updateHealthHud();scheduleSave();
-  }else if(foodLevel===0&&playerHealth>1){
+  }else if(foodLevel===0&&playerHealth>(difficulty==='easy'?10:difficulty==='normal'?1:0)){
     damagePlayer(1);
   }
 }
@@ -511,7 +525,7 @@ function setBlock(x,y,z,id){
 }
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
 const faces=[{d:[1,0,0],v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]],shade:.8},{d:[-1,0,0],v:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]],shade:.8},{d:[0,1,0],v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]],shade:1.13},{d:[0,-1,0],v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]],shade:.54},{d:[0,0,1],v:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]],shade:.9},{d:[0,0,-1],v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]],shade:.73}];
-const materials={};for(const b of BLOCKS)materials[b.id]=new THREE.MeshLambertMaterial({vertexColors:true,side:b.transparent?THREE.DoubleSide:THREE.FrontSide,transparent:!!b.transparent,opacity:b.transparent?.72:1,depthWrite:!b.transparent});
+const materials={};for(const b of BLOCKS)materials[b.id]=makeTerrainMaterial({vertexColors:true,side:b.transparent?THREE.DoubleSide:THREE.FrontSide,transparent:!!b.transparent,opacity:b.transparent?.72:1,depthWrite:!b.transparent});
 function rebuild(cx,cz){
   const chunkKey=`${cx},${cz}`;
   const prior=loaded.get(chunkKey);
@@ -637,7 +651,7 @@ function readWorldIndex(){
 }
 function saveData(){
   if(!active || !worldId)return;
-  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,playerHealth,playerEffects,experienceTotal,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],slots,slotCounts,selected,storageSlots,storageCounts,craftGrid,craftingTableOpen,chestContents:[...chestContents],position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
+  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,difficulty,playerHealth,playerEffects,experienceTotal,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],slots,slotCounts,selected,storageSlots,storageCounts,craftGrid,craftingTableOpen,chestContents:[...chestContents],position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
   try {
     localStorage.setItem(WORLD_PREFIX+worldId,JSON.stringify(obj));
     const index=readWorldIndex().filter(item=>item.id!==worldId);
@@ -702,6 +716,7 @@ function validateImportedWorld(data){
   if(!data||typeof data!=='object'||Array.isArray(data))return false;
   if(typeof data.worldName!=='string'||!data.worldName.trim()||data.worldName.length>100)return false;
   if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
+  if(data.difficulty!==undefined&&!DIFFICULTIES.includes(data.difficulty))return false;
   if(data.seed64!==undefined&&(typeof data.seed64!=='string'||!isSignedLong(data.seed64)))return false;
   if(data.playerHealth!==undefined&&(!Number.isInteger(data.playerHealth)||data.playerHealth<1||data.playerHealth>20))return false;
   if(data.experienceTotal!==undefined&&(!Number.isSafeInteger(data.experienceTotal)||data.experienceTotal<0||data.experienceTotal>1000000000))return false;
@@ -780,7 +795,7 @@ function lockPointer(){
   const request=renderer.domElement.requestPointerLock?.();
   request?.catch?.(()=>{});
 }
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed64=data.seed64??String(data.seed);worldgenVersion=data.worldgenVersion??1;seed=terrainSeed(BigInt(seed64),worldgenVersion);heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;experienceTotal=Number.isSafeInteger(data.experienceTotal)?Math.max(0,Math.min(1000000000,data.experienceTotal)):0;playerEffects=Object.fromEntries(Object.entries(data.playerEffects??{}).filter(([id,value])=>SUPPORTED_EFFECTS.has(id)&&value.seconds>0));regenerationTimer=0;renderEffects();foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);selected=Number.isInteger(data.selected)&&data.selected>=0&&data.selected<9?data.selected:0;storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;craftingTableOpen=mode==="survival"&&data.craftingTableOpen===true&&Array.isArray(data.craftGrid)&&data.craftGrid.length===9;craftGrid=Array.isArray(data.craftGrid)&&data.craftGrid.length===(craftingTableOpen?9:4)?data.craftGrid.map(id=>typeof id==="string"?id:AIR):Array(4).fill(AIR);inventoryOpen=false;openChestKey=null;chestContents=new Map(Array.isArray(data.chestContents)?data.chestContents:[]);$("#inventory").classList.add("hidden");savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed64=data.seed64??String(data.seed);worldgenVersion=data.worldgenVersion??1;seed=terrainSeed(BigInt(seed64),worldgenVersion);heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;difficulty=DIFFICULTIES.includes(data.difficulty)?data.difficulty:'normal';playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;experienceTotal=Number.isSafeInteger(data.experienceTotal)?Math.max(0,Math.min(1000000000,data.experienceTotal)):0;playerEffects=Object.fromEntries(Object.entries(data.playerEffects??{}).filter(([id,value])=>SUPPORTED_EFFECTS.has(id)&&value.seconds>0));regenerationTimer=0;renderEffects();foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);selected=Number.isInteger(data.selected)&&data.selected>=0&&data.selected<9?data.selected:0;storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;craftingTableOpen=mode==="survival"&&data.craftingTableOpen===true&&Array.isArray(data.craftGrid)&&data.craftGrid.length===9;craftGrid=Array.isArray(data.craftGrid)&&data.craftGrid.length===(craftingTableOpen?9:4)?data.craftGrid.map(id=>typeof id==="string"?id:AIR):Array(4).fill(AIR);inventoryOpen=false;openChestKey=null;chestContents=new Map(Array.isArray(data.chestContents)?data.chestContents:[]);$("#inventory").classList.add("hidden");savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);if(difficulty==='peaceful')for(const entity of [...mobs.entities])if(['zombie','creeper'].includes(entity.type))mobs.remove(entity);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));const survival=$('#mode').value==='survival';newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:6,seed:terrainSeed(longSeed,6),mode:$('#mode').value,edits:[],slots:survival?Array(9).fill(AIR):['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts:Array(9).fill(survival?0:64)})};
 $('#resume').onclick=showWorlds;
 function registerBlock(id, name=id.replaceAll('_',' ')){
@@ -812,12 +827,15 @@ async function ensureJavaBlock(id){
     }
   }catch(error){notice(`Model import: ${error.message}`)}
 }
-async function importJavaJar(file){
+let jarImportGeneration=0;
+async function importJavaJar(file,persist=true){
   if(!file)return;
+  const generation=++jarImportGeneration;
   const status=$('#assetstatus');
   status.textContent='Reading Java 1.21.11 resources…';
   try{
     const imported=await loadJavaResources(file,message=>status.textContent=message);
+    if(generation!==jarImportGeneration){imported.dispose();return}
     for(const id of imported.blockNames)registerBlock(id, imported.displayName(id,'block'));
     for(const id of imported.itemNames)registerItem(id, imported.displayName(id));
     const old=javaResources;
@@ -837,6 +855,10 @@ async function importJavaJar(file){
     if(inventoryOpen)renderInventory($('#itemsearch').value.trim());
     status.textContent=`Java 1.21.11 loaded · ${imported.blockNames.length} blocks · ${imported.itemNames.length} items · ${imported.textureCount()} textures`;
     notice(status.textContent);
+    if(persist){
+      try{await rememberJavaJar(file)}
+      catch{status.textContent+=' · ブラウザへのキャッシュ保存に失敗しました'}
+    }
   }catch(error){
     status.textContent=`Asset import failed: ${error.message}`;
     notice(status.textContent);
@@ -847,6 +869,9 @@ $('#javajar').addEventListener('change',event=>{
   event.target.value='';
 });
 $('#loadassets').onclick=()=>$('#javajar').click();
+recallJavaJar().then(file=>{
+  if(file&&jarImportGeneration===0)void importJavaJar(file,false);
+}).catch(()=>{});
 function renderHotbar(){$('#hotbar').innerHTML=slots.map((id,i)=>`<div class="slot ${i===selected?'selected':''}" data-slot="${i}"><em>${i+1}</em><i style="${itemStyle(id)}"></i>${mode==='survival'&&id!==AIR&&slotCounts[i]>0?`<small>${slotCounts[i]}</small>`:''}</div>`).join('');$('#selected-name').textContent=itemInfo(slots[selected])?.name??slots[selected];$$('.slot').forEach(s=>s.onclick=()=>{selected=Number(s.dataset.slot);renderHotbar()})}
 function collectBlock(id){
   if(id==='air'||id==='bedrock'||id==='water')return;
@@ -1241,7 +1266,7 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block [count] /clear [@s] [item] [maxCount] /item replace entity @s <slot> with <item> [count] /item replace block x y z container.N with <item> [count] /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /effect give @s <effect> [seconds] [amplifier] /effect clear @s [effect] /experience add|set @s amount points|levels /experience query @s points|levels /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block [count] /clear [@s] [item] [maxCount] /item replace entity @s <slot> with <item> [count] /item replace block x y z container.N with <item> [count] /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /effect give @s <effect> [seconds] [amplifier] /effect clear @s [effect] /experience add|set @s amount points|levels /experience query @s points|levels /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /difficulty peaceful|easy|normal|hard /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
   case 'effect':{
     const [action,target,idInput,secondsInput,amplifierInput]=parts;
     const id=idInput?.replace(/^minecraft:/,'');
@@ -1452,6 +1477,9 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     if(!MobWorld.supports(type)||![1,4].includes(parts.length)||p.length!==3||!p.every(Number.isFinite)){
       chat('使用法 /summon pig|cow|sheep|zombie|creeper [x y z]');break;
     }
+    if(difficulty==='peaceful'&&['zombie','creeper'].includes(type)){
+      chat('ピースフルでは敵対Mobは出現しません');break;
+    }
     const entity=mobs.spawn(type,...p);
     if(!entity){chat('Mobの上限（128体）に達しました');break}
     scheduleSave();chat(`${type} を召喚しました`);break;
@@ -1476,6 +1504,14 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     doDaylightCycle=parts[1]==='true';scheduleSave();chat(`doDaylightCycle = ${doDaylightCycle}`);break;
   }
   case 'gamemode':{if(!['creative','survival'].includes(parts[0])){chat('使用法 /gamemode creative|survival');break}mode=parts[0];fly=mode==='creative';updateHealthHud();scheduleSave();chat(`ゲームモード ${mode}`);break}
+  case 'difficulty':{
+    if(parts.length===0){chat(`難易度 ${difficulty}`);break}
+    const next=parts[0]?.toLowerCase();
+    if(parts.length!==1||!DIFFICULTIES.includes(next)){chat('使用法 /difficulty peaceful|easy|normal|hard');break}
+    difficulty=next;
+    if(difficulty==='peaceful')for(const entity of [...mobs.entities])if(['zombie','creeper'].includes(entity.type))mobs.remove(entity);
+    scheduleSave();chat(`難易度を ${difficulty} に設定しました`);break;
+  }
   case 'weather':{if(!['clear','rain','thunder'].includes(parts[0])||parts.length!==1){chat('使用法 /weather clear|rain|thunder');break}weather=parts[0];updateSun();scheduleSave();chat(`天気を ${weather} に設定しました`);break}
   case 'save':saveData();chat('ワールドを保存しました');break;
   case 'spawnpoint':case 'setworldspawn':{
@@ -1514,7 +1550,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     break;
   }
   default:chat(`不明なコマンド: /${cmd}。/help を参照してください`)} }
-function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.sin(a);sun.position.set(location.x+Math.cos(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
+function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.sin(a);sun.position.set(location.x+Math.cos(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);atmosphere.update(new THREE.Vector3().subVectors(sun.position,sun.target.position).normalize(),weather);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
 if(isTouchDevice){
   let lookPointer=null;
   let previousX=0,previousY=0;
@@ -1568,7 +1604,10 @@ let last=performance.now(),frames=0,fps=0,second=0,daylightRefresh=0,worldAutosa
 function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();updateEffects(dt);const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const sprinting=(keys.has('ShiftLeft')||keys.has('ShiftRight'))&&(mode==='creative'||foodLevel>6);const speed=(sprinting?10:5.4)*Math.max(.1,1+(effectLevel('speed')+1)*.2-(effectLevel('slowness')+1)*.15);const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
     updateHunger(dt,!!(forward||strafe),sprinting);
     playerDamageCooldown=Math.max(0,playerDamageCooldown-dt);
-    mobs.update(dt,now/1000,location,damagePlayer);
+    mobs.update(dt,now/1000,location,(amount)=>{
+      if(difficulty==='peaceful')return;
+      damagePlayer(difficulty==='easy'?Math.min(amount/2+1,amount):difficulty==='hard'?amount*1.5:amount);
+    });
     if(doDaylightCycle){
       timeOfDay=(timeOfDay+dt*20)%24000;
       daylightRefresh+=dt;
@@ -1602,6 +1641,6 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
         if(fallDamage>0)damagePlayer(fallDamage);
       }
     }
-    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();updateRain(dt);skyClouds.position.x+=dt*.35;water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed64}`}}renderer.render(scene,camera)}
+    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();updateRain(dt);skyClouds.position.x+=dt*.35;waterSurface.update(now*.001);water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed64}`}}renderer.render(scene,camera)}
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});requestAnimationFrame(animate);
 window.addEventListener('beforeunload',saveData);

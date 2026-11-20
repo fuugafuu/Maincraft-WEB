@@ -309,11 +309,12 @@ export async function loadJavaResources(file, progress = () => {}) {
     }
   }
 
-  const opaqueMaterial = new THREE.MeshLambertMaterial({
-    map:tex, vertexColors:true, side:THREE.DoubleSide, transparent:false, alphaTest:.12,
+  const opaqueMaterial = new THREE.MeshStandardMaterial({
+    map:tex, vertexColors:true, side:THREE.DoubleSide, transparent:false, alphaTest:.12, roughness:1, metalness:0,
   });
-  const glassMaterial = new THREE.MeshLambertMaterial({
+  const glassMaterial = new THREE.MeshPhysicalMaterial({
     map:tex, vertexColors:true, side:THREE.DoubleSide, transparent:true, opacity:.78, depthWrite:false,
+    roughness:.14, metalness:0, clearcoat:.65,
   });
 
   return {
