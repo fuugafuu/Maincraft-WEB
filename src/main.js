@@ -92,6 +92,39 @@ function generatedBlock(x,y,z){
   return AIR;
 }
 function getBlock(x,y,z){x=Math.floor(x);y=Math.floor(y);z=Math.floor(z);return savedEdits.get(key(x,y,z))??generatedBlock(x,y,z)}
+const PLAYER_RADIUS=.3, PLAYER_EYE=1.62, PLAYER_HEIGHT=1.8;
+function isSolid(id){
+  return id!==AIR && id!=='water' && !/^(lava|.*_torch|.*_flower|.*_sapling|.*_grass|.*_fern|.*_mushroom|.*_carpet|.*_rail|.*_button|.*_pressure_plate|.*_sign|.*_banner|.*_vine|.*_seagrass|.*_coral_fan|.*_candle|redstone_wire|tripwire|lever|ladder|fire|soul_fire)$/.test(id);
+}
+function playerCollides(x,y,z){
+  const minX=Math.floor(x-PLAYER_RADIUS+.001),maxX=Math.floor(x+PLAYER_RADIUS-.001);
+  const minY=Math.floor(y-PLAYER_EYE+.001),maxY=Math.floor(y-PLAYER_EYE+PLAYER_HEIGHT-.001);
+  const minZ=Math.floor(z-PLAYER_RADIUS+.001),maxZ=Math.floor(z+PLAYER_RADIUS-.001);
+  for(let bx=minX;bx<=maxX;bx++)for(let bz=minZ;bz<=maxZ;bz++)for(let by=minY;by<=maxY;by++){
+    if(isSolid(getBlock(bx,by,bz)))return true;
+  }
+  return false;
+}
+function moveHorizontal(dx,dz){
+  const steps=Math.max(1,Math.ceil(Math.max(Math.abs(dx),Math.abs(dz))/.15));
+  const stepX=dx/steps,stepZ=dz/steps;
+  for(let i=0;i<steps;i++){
+    if(!playerCollides(location.x+stepX,location.y,location.z))location.x+=stepX;
+    if(!playerCollides(location.x,location.y,location.z+stepZ))location.z+=stepZ;
+  }
+}
+function moveVertical(dy){
+  const steps=Math.max(1,Math.ceil(Math.abs(dy)/.15));
+  const step=dy/steps;
+  for(let i=0;i<steps;i++){
+    if(playerCollides(location.x,location.y+step,location.z)){
+      if(step<0)grounded=true;
+      vy=0;
+      return;
+    }
+    location.y+=step;
+  }
+}
 function setBlock(x,y,z,id){if(y<1||y>100)return;const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else savedEdits.set(k,id);for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz)}scheduleSave()}
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
 const faces=[{d:[1,0,0],v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]],shade:.8},{d:[-1,0,0],v:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]],shade:.8},{d:[0,1,0],v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]],shade:1.13},{d:[0,-1,0],v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]],shade:.54},{d:[0,0,1],v:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]],shade:.9},{d:[0,0,-1],v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]],shade:.73}];
@@ -359,8 +392,15 @@ if(isTouchDevice){
   }
 }
 let last=performance.now(),frames=0,fps=0,second=0;
-function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?10:5.4;location.x+=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;location.z+=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
-    if(fly){location.y+=(Number(keys.has('Space'))-Number(keys.has('ControlLeft')))*speed*dt;vy=0}else{if(keys.has('Space')&&grounded){vy=8.2;grounded=false}vy-=22*dt;location.y+=vy*dt;const footX=Math.floor(location.x),footZ=Math.floor(location.z);let solid=-1;for(let y=Math.min(90,Math.floor(location.y));y>=0;y--){const b=getBlock(footX,y,footZ);if(b!==AIR&&b!=='water'){solid=y+1;break}}if(location.y<solid+1.65){location.y=solid+1.65;vy=0;grounded=true}else grounded=false}
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?10:5.4;const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
+    if(fly){location.x+=dx;location.z+=dz;location.y+=(Number(keys.has('Space'))-Number(keys.has('ControlLeft')))*speed*dt;vy=0}else{
+      moveHorizontal(dx,dz);
+      if(keys.has('Space')&&grounded){vy=8.2;grounded=false}
+      grounded=false;
+      vy-=22*dt;
+      moveVertical(vy*dt);
+      if(vy===0&&playerCollides(location.x,location.y-.025,location.z))grounded=true;
+    }
     location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();skyClouds.position.x+=dt*.35;water.material.opacity=.70+Math.sin(now*.0018)*.04;second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed}`}}renderer.render(scene,camera)}
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});requestAnimationFrame(animate);
 window.addEventListener('beforeunload',saveData);
