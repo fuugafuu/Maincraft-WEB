@@ -62,9 +62,10 @@ function chooseVariants(state, id) {
     return variant ? [Array.isArray(variant) ? variant[0] : variant] : [];
   }
   if(state.multipart) {
-    return state.multipart.filter(part => !part.when || conditionMatches(part.when, properties))
-      .map(part => Array.isArray(part.apply) ? part.apply[0] : part.apply)
-      .filter(Boolean);
+    return state.multipart.map(part => ({
+      ...(Array.isArray(part.apply) ? part.apply[0] : part.apply),
+      when: part.when,
+    })).filter(part => part.model);
   }
   return [];
 }
@@ -185,7 +186,7 @@ export async function loadJavaResources(file, progress = () => {}) {
       }
       if (Object.keys(faces).length) definitions.push({
         from: element.from, to: element.to, faces, rotation:element.rotation,
-        x:variant.x||0, y:variant.y||0,
+        x:variant.x||0, y:variant.y||0, when:variant.when,
       });
       }
     }
@@ -195,17 +196,35 @@ export async function loadJavaResources(file, progress = () => {}) {
       && definitions[0].to.every(v => v === 16)
       && !definitions[0].rotation;
     const transparent = /glass|ice|water|leaves|slime|honey|pane|grate|bars/.test(actual);
-    const result = {elements:definitions, fullCube, transparent};
+    const result = {elements:definitions, fullCube, transparent, multipart:!!state?.multipart};
     resolved.set(actual,result);
     return result;
   }
 
-  function addBlock(out, block, x, y, z, getNeighbor, id) {
+  function addBlock(out, block, x, y, z, getNeighbor, id, getRawNeighbor = getNeighbor) {
+    const properties = {...defaultProperties};
+    if(id === 'redstone_wire') {
+      for(const direction of ['north','south','east','west']) properties[direction]='none';
+    }
+    if(/_fence$|_wall$|_pane$/.test(id) || id === 'iron_bars') {
+      const offsets = {north:[0,0,-1], south:[0,0,1], east:[1,0,0], west:[-1,0,0]};
+      for(const [direction, offset] of Object.entries(offsets)) {
+        const neighbor = getRawNeighbor(...offset);
+        const matches = neighbor === id || (id.endsWith('_fence') && neighbor.endsWith('_fence'))
+          || ((id.endsWith('_pane') || id === 'iron_bars') && (neighbor.endsWith('_pane') || neighbor === 'iron_bars'));
+        const solid = neighbor !== 'air' && !/glass|leaves|water|ice|slime|honey/.test(neighbor)
+          && !neighbor.endsWith('_fence') && !neighbor.endsWith('_pane') && neighbor !== 'iron_bars';
+        const connects = matches || solid;
+        properties[direction] = id.endsWith('_wall') ? (connects ? 'low' : 'none') : String(connects);
+      }
+      if(id.endsWith('_wall')) properties.up = 'true';
+    }
     const rotate = (v, axis, angle, origin) => {
       const pivot = new THREE.Vector3(...origin.map(n => n / 16));
       v.sub(pivot).applyAxisAngle(axis, angle * Math.PI / 180).add(pivot);
     };
     for (const element of block.elements) {
+      if(element.when && !conditionMatches(element.when,properties)) continue;
       for (const [side, face] of Object.entries(element.faces)) {
         if ((block.fullCube || face.cull) && getNeighbor(...sides[side].normal) !== 'air') continue;
         const corners = elementCorners(element.from, element.to, side);

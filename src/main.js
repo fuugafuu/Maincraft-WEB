@@ -116,7 +116,7 @@ function rebuild(cx,cz){
       javaResources.addBlock(output,native,x,y,z,(dx,dy,dz)=>{
         const neighbor=getBlock(x+dx,y+dy,z+dz);
         return (byId[neighbor]?.transparent)?AIR:neighbor;
-      },id);
+      },id,(dx,dy,dz)=>getBlock(x+dx,y+dy,z+dz));
       continue;
     }
     if(!buffers.has(id))buffers.set(id,{pos:[],color:[],normal:[]});
