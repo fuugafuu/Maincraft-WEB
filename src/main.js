@@ -663,7 +663,7 @@ function lockPointer(){
   request?.catch?.(()=>{});
 }
 function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
-$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:5,seed,mode:$('#mode').value,edits:[]})};
+$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));const survival=$('#mode').value==='survival';newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:5,seed,mode:$('#mode').value,edits:[],slots:survival?Array(9).fill(AIR):['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts:Array(9).fill(survival?0:64)})};
 $('#resume').onclick=showWorlds;
 function registerBlock(id){
   if(byId[id])return;
@@ -720,7 +720,20 @@ $('#javajar').addEventListener('change',event=>{
   event.target.value='';
 });
 $('#loadassets').onclick=()=>$('#javajar').click();
-function renderHotbar(){$('#hotbar').innerHTML=slots.map((id,i)=>`<div class="slot ${i===selected?'selected':''}" data-slot="${i}"><em>${i+1}</em><i style="background:#${(byId[id]?.color??foodById[id]?.color??0xffffff).toString(16).padStart(6,'0')}"></i>${foodById[id]?`<small>${slotCounts[i]}</small>`:''}</div>`).join('');$('#selected-name').textContent=byId[slots[selected]]?.name??foodById[slots[selected]]?.name??slots[selected];$$('.slot').forEach(s=>s.onclick=()=>{selected=Number(s.dataset.slot);renderHotbar()})}
+function renderHotbar(){$('#hotbar').innerHTML=slots.map((id,i)=>`<div class="slot ${i===selected?'selected':''}" data-slot="${i}"><em>${i+1}</em><i style="background:#${(byId[id]?.color??foodById[id]?.color??0xffffff).toString(16).padStart(6,'0')}"></i>${mode==='survival'&&id!==AIR&&slotCounts[i]>0?`<small>${slotCounts[i]}</small>`:''}</div>`).join('');$('#selected-name').textContent=byId[slots[selected]]?.name??foodById[slots[selected]]?.name??slots[selected];$$('.slot').forEach(s=>s.onclick=()=>{selected=Number(s.dataset.slot);renderHotbar()})}
+function collectBlock(id){
+  if(id==='air'||id==='bedrock'||id==='water')return;
+  const drop=({grass:'dirt',stone:'cobble',leaves:'air'}[id]??id);
+  if(drop==='air')return;
+  const stack=slots.findIndex((slot,index)=>slot===drop&&slotCounts[index]>0&&slotCounts[index]<64);
+  const empty=slots.findIndex((slot,index)=>slot==='air'||slotCounts[index]===0);
+  const index=stack>=0?stack:empty;
+  if(index<0){notice('インベントリがいっぱいです');return}
+  if(index===empty&&stack<0)slotCounts[index]=0;
+  slots[index]=drop;
+  slotCounts[index]++;
+  renderHotbar();
+}
 function $$(s){return [...document.querySelectorAll(s)]}
 function notice(msg){const el=$('#notice');el.textContent=msg;el.classList.add('show');clearTimeout(notice.timeout);notice.timeout=setTimeout(()=>el.classList.remove('show'),2400)}
 function renderInventory(query=''){
@@ -778,10 +791,24 @@ function interact(place){
   const p=hit.point.clone().addScaledVector(normal,place?.025:-.025);
   if(place)p.copy(hit.point).addScaledVector(normal,.025);
   const x=Math.floor(p.x),y=Math.floor(p.y),z=Math.floor(p.z);
+  if(y<1||y>100)return;
   if(place){
     if(Math.abs(x-location.x)<.8&&Math.abs(z-location.z)<.8&&y<location.y+.6&&y+1>location.y-1.6)return;
-    setBlock(x,y,z,slots[selected]);
-  }else if(getBlock(x,y,z)!=='bedrock')setBlock(x,y,z,AIR);
+    const id=slots[selected];
+    if(!byId[id]||id===AIR||id==='bedrock'||(mode==='survival'&&slotCounts[selected]===0))return;
+    if(getBlock(x,y,z)!==AIR&&getBlock(x,y,z)!=='water')return;
+    setBlock(x,y,z,id);
+    if(mode==='survival'){
+      slotCounts[selected]--;
+      if(slotCounts[selected]===0)slots[selected]=AIR;
+      renderHotbar();
+    }
+  }else{
+    const id=getBlock(x,y,z);
+    if(id==='bedrock'||id===AIR)return;
+    setBlock(x,y,z,AIR);
+    if(mode==='survival')collectBlock(id);
+  }
 }
 function openChat(prefill=''){chatOpen=true;document.exitPointerLock?.();$('#chat').classList.remove('hidden');$('#command').value=prefill;$('#command').focus()}
 function closeChat(){chatOpen=false;$('#chat').classList.add('hidden');lockPointer()}
