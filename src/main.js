@@ -722,19 +722,19 @@ function lockPointer(){
 function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed64=data.seed64??String(data.seed);worldgenVersion=data.worldgenVersion??1;seed=terrainSeed(BigInt(seed64),worldgenVersion);heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);selected=Number.isInteger(data.selected)&&data.selected>=0&&data.selected<9?data.selected:0;storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;craftingTableOpen=mode==="survival"&&data.craftingTableOpen===true&&Array.isArray(data.craftGrid)&&data.craftGrid.length===9;craftGrid=Array.isArray(data.craftGrid)&&data.craftGrid.length===(craftingTableOpen?9:4)?data.craftGrid.map(id=>typeof id==="string"?id:AIR):Array(4).fill(AIR);inventoryOpen=false;openChestKey=null;chestContents=new Map(Array.isArray(data.chestContents)?data.chestContents:[]);$("#inventory").classList.add("hidden");savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));const survival=$('#mode').value==='survival';newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:6,seed:terrainSeed(longSeed,6),mode:$('#mode').value,edits:[],slots:survival?Array(9).fill(AIR):['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts:Array(9).fill(survival?0:64)})};
 $('#resume').onclick=showWorlds;
-function registerBlock(id){
+function registerBlock(id, name=id.replaceAll('_',' ')){
   if(byId[id])return;
   let value=0;
   for(const char of id)value=(Math.imul(value,31)+char.charCodeAt(0))|0;
   const tint=new THREE.Color().setHSL((value>>>0)%360/360,.22,.45);
-  const block={id,name:id.replaceAll('_',' '),color:tint.getHex(),transparent:/glass|ice|leaves|pane|grate|bars/.test(id)};
+  const block={id,name,color:tint.getHex(),transparent:/glass|ice|leaves|pane|grate|bars/.test(id)};
   BLOCKS.push(block);
   byId[id]=block;
   materials[id]=materials.stone;
 }
-function registerItem(id){
+function registerItem(id, name=id.replaceAll('_',' ')){
   if(knownItem(id))return;
-  const item={id,name:id.replaceAll('_',' '),color:0xc4b89e};
+  const item={id,name,color:0xc4b89e};
   ITEMS.push(item);
   itemById[id]=item;
 }
@@ -757,8 +757,8 @@ async function importJavaJar(file){
   status.textContent='Reading Java 1.21.11 resources…';
   try{
     const imported=await loadJavaResources(file,message=>status.textContent=message);
-    for(const name of imported.blockNames)registerBlock(name);
-    for(const name of imported.itemNames)registerItem(name);
+    for(const id of imported.blockNames)registerBlock(id, imported.displayName(id,'block'));
+    for(const id of imported.itemNames)registerItem(id, imported.displayName(id));
     const old=javaResources;
     javaResources=imported;
     for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock','sandstone','coal_ore','iron_ore','gold_ore','diamond_ore'])){

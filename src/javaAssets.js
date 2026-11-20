@@ -78,6 +78,7 @@ export async function loadJavaResources(file, progress = () => {}) {
   progress('JARを展開しています…');
   const archive = unzipSync(new Uint8Array(await file.arrayBuffer()), {
     filter: entry => entry.name === 'version.json'
+      || entry.name === prefix + 'lang/en_us.json'
       || entry.name.startsWith(prefix + 'blockstates/')
       || entry.name.startsWith(prefix + 'models/block/')
       || entry.name.startsWith(prefix + 'models/item/')
@@ -99,6 +100,13 @@ export async function loadJavaResources(file, progress = () => {}) {
     .filter(n => n.startsWith(prefix + 'items/') && n.endsWith('.json'))
     .map(n => n.slice((prefix + 'items/').length, -5))
     .sort();
+  const translations = JSON.parse(strFromU8(archive[prefix + 'lang/en_us.json'] || new Uint8Array([123,125])));
+  function displayName(id, category = 'item') {
+    const name = aliases[id] || id;
+    return translations[`${category}.minecraft.${name}`]
+      || translations[`block.minecraft.${name}`]
+      || name.replaceAll('_', ' ');
+  }
   const iconUrls = new Map();
   function readItemModelTexture(modelName, visited = new Set()) {
     const name = modelName?.replace(/^minecraft:/, '');
@@ -312,6 +320,7 @@ export async function loadJavaResources(file, progress = () => {}) {
     version:'1.21.11',
     blockNames:names,
     itemNames,
+    displayName,
     itemIcon,
     ensure,
     getModel(id){return resolved.get(aliases[id]||id)},
