@@ -13,6 +13,7 @@ const BLOCKS = [
   {id:'gold_ore',name:'金鉱石',color:0xab9561},
   {id:'diamond_ore',name:'ダイヤモンド鉱石',color:0x659f9b},
   {id:'sand',name:'砂',color:0xd9c68b},
+  {id:'sandstone',name:'砂岩',color:0xdbc895},
   {id:'wood',name:'オークの原木',color:0x795334,top:0xac895e},
   {id:'leaves',name:'葉',color:0x3c8140,transparent:true},
   {id:'planks',name:'オークの板材',color:0xbc8e52},
@@ -135,6 +136,7 @@ function generatedOre(x,y,z,h){
   return 'stone';
 }
 const heightCache=new Map(),biomeCache=new Map(),treeCache=new Map(),treeColumnCache=new Map();
+const structureCache=new Map();
 function biome(x,z){
   if(worldgenVersion<4)return 'plains';
   const position=`${x},${z}`;
@@ -206,10 +208,59 @@ function treesForColumn(x,z){
   treeColumnCache.set(position,trees);
   return trees;
 }
+function desertWellInCell(cellX,cellZ){
+  if(worldgenVersion<5)return null;
+  const index=`${cellX},${cellZ}`;
+  if(structureCache.has(index))return structureCache.get(index);
+  const x=cellX*96+24+Math.floor(hash(cellX,cellZ,seed+600)*48);
+  const z=cellZ*96+24+Math.floor(hash(cellX,cellZ,seed+601)*48);
+  const y=height(x,z);
+  let valid=hash(cellX,cellZ,seed+602)>.35&&biome(x,z)==='desert'&&y>SEA+2;
+  if(valid){
+    for(let dx=-2;dx<=2&&valid;dx++)for(let dz=-2;dz<=2;dz++){
+      if(biome(x+dx,z+dz)!=='desert'||Math.abs(height(x+dx,z+dz)-y)>1){valid=false;break}
+    }
+  }
+  const result=valid?{x,y,z}:null;
+  structureCache.set(index,result);
+  return result;
+}
+function desertWellBlock(x,y,z){
+  if(worldgenVersion<5)return null;
+  const well=desertWellInCell(Math.floor(x/96),Math.floor(z/96));
+  if(!well)return null;
+  const dx=x-well.x,dz=z-well.z,dy=y-well.y;
+  if(Math.abs(dx)>2||Math.abs(dz)>2||dy<0||dy>4)return null;
+  if(dy===0)return 'sandstone';
+  if(dy===1){
+    if(Math.abs(dx)+Math.abs(dz)<=1)return 'water';
+    if(Math.abs(dx)===2||Math.abs(dz)===2)return 'sandstone';
+    return AIR;
+  }
+  if(dy<=3)return Math.abs(dx)===2&&Math.abs(dz)===2?'sandstone':AIR;
+  return 'sandstone';
+}
+function locateDesertWell(x,z){
+  const cx=Math.floor(x/96),cz=Math.floor(z/96);
+  let closest=null,bestDistance=Infinity;
+  for(let radius=0;radius<=12;radius++){
+    for(let a=-radius;a<=radius;a++)for(let b=-radius;b<=radius;b++){
+      if(Math.max(Math.abs(a),Math.abs(b))!==radius)continue;
+      const well=desertWellInCell(cx+a,cz+b);
+      if(!well)continue;
+      const distance=(well.x-x)**2+(well.z-z)**2;
+      if(distance<bestDistance){closest=well;bestDistance=distance}
+    }
+    if(closest&&Math.sqrt(bestDistance)<radius*96-140)break;
+  }
+  return closest;
+}
 function generatedBlock(x,y,z){
   if(y<0)return AIR;
   if(y===0)return 'bedrock';
   const h=height(x,z);
+  const structure=desertWellBlock(x,y,z);
+  if(structure!==null)return structure;
   if(y>h+9)return AIR;
   if(y<=h){
     if(isCave(x,y,z,h))return AIR;
@@ -286,7 +337,7 @@ function rebuild(cx,cz){
   for(let z=cz*CHUNK;z<(cz+1)*CHUNK;z++)
   for(let y=0;y<=Math.max(height(x,z)+9,32,editedChunkHeights.get(chunkKey)??0);y++){
     const id=getBlock(x,y,z);
-    if(id===AIR||id==='water')continue;
+    if(id===AIR||(id==='water'&&y<=SEA))continue;
     const b=byId[id];
     if(!b)continue;
     const native=javaResources?.getModel(id);
@@ -466,7 +517,7 @@ function validateImportedWorld(data){
   if(typeof data.worldName!=='string'||!data.worldName.trim()||data.worldName.length>100)return false;
   if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
   if(data.seed64!==undefined&&(typeof data.seed64!=='string'||!isSignedLong(data.seed64)))return false;
-  if(data.worldgenVersion!==undefined&&![1,2,3,4].includes(data.worldgenVersion))return false;
+  if(data.worldgenVersion!==undefined&&![1,2,3,4,5].includes(data.worldgenVersion))return false;
   if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
   if(!data.edits.every(entry=>Array.isArray(entry)&&entry.length===2&&/^[-]?\d+,[-]?\d+,[-]?\d+$/.test(entry[0])&&typeof entry[1]==='string'&&entry[1].length<=100))return false;
   const position=data.position;
@@ -510,8 +561,8 @@ function stringSeed(s){
   return BigInt(hash);
 }
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();biomeCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
-$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:4,seed,mode:$('#mode').value,edits:[]})};
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:5,seed,mode:$('#mode').value,edits:[]})};
 $('#resume').onclick=showWorlds;
 function registerBlock(id){
   if(byId[id])return;
@@ -545,7 +596,7 @@ async function importJavaJar(file){
     for(const name of imported.blockNames)registerBlock(name);
     const old=javaResources;
     javaResources=imported;
-    for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock','coal_ore','iron_ore','gold_ore','diamond_ore'])){
+    for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock','sandstone','coal_ore','iron_ore','gold_ore','diamond_ore'])){
       await javaResources.ensure(id);
     }
     for(const id of new Set([...savedEdits.values()])){
@@ -633,7 +684,7 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /time set day|night|noon|midnight /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome>');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /time set day|night|noon|midnight /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
@@ -691,7 +742,14 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
   }
   case 'locate':{
     const target=parts[1]?.replace(/^minecraft:/,'');
-    if(parts[0]!=='biome'||!['plains','forest','desert','snowy_plains','mountains'].includes(target)||parts.length!==2){chat('使用法 /locate biome plains|forest|desert|snowy_plains|mountains');break}
+    if(parts[0]==='structure'&&target==='desert_well'&&parts.length===2){
+      if(worldgenVersion<5){chat('このワールドには砂漠の井戸が生成されません');break}
+      const well=locateDesertWell(location.x,location.z);
+      if(!well){chat('近くに砂漠の井戸が見つかりませんでした');break}
+      chat(`desert_well の位置 [${well.x}, ${well.y}, ${well.z}] (${Math.round(Math.hypot(well.x-location.x,well.z-location.z))} ブロック先)`);
+      break;
+    }
+    if(parts[0]!=='biome'||!['plains','forest','desert','snowy_plains','mountains'].includes(target)||parts.length!==2){chat('使用法 /locate biome <biome> または /locate structure desert_well');break}
     if(worldgenVersion<4&&target!=='plains'){chat('このワールドには指定したバイオームがありません');break}
     const found=locateBiome(target,location.x,location.z);
     if(!found){chat(`1024ブロック以内に ${target} が見つかりませんでした`);break}
