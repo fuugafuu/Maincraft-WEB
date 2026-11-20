@@ -1126,7 +1126,7 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block [count] /clear [@s] [item] [maxCount] /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;fallDistance=0;grounded=false;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
@@ -1195,7 +1195,40 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     for(const id of usedBlocks)void ensureJavaBlock(id);
     chat(`${changed.length} ブロックを複製しました`);break;
   }
-  case 'give':{const id=parts.find(p=>byId[p.replace('minecraft:','')]||foodById[p.replace('minecraft:','')])?.replace('minecraft:','');if(!id){chat('使用法 /give block|food [count]');break}const count=parts.length>1?Number(parts.at(-1)):64;if(!Number.isInteger(count)||count<1||count>64){chat('個数は1〜64で指定してください');break}if(mode==='survival'){if(!addInventoryItem(id,count,true)){chat('インベントリに空きがありません');break}}else{slots[selected]=id;slotCounts[selected]=count}renderHotbar();if(!foodById[id])void ensureJavaBlock(id);scheduleSave();chat(`${id} を入手しました`);break}
+  case 'give':{
+    const tokens=parts[0]==='@s'?parts.slice(1):parts;
+    const id=tokens[0]?.replace(/^minecraft:/,'');
+    const count=tokens.length===2?Number(tokens[1]):1;
+    if(tokens.length<1||tokens.length>2||!(byId[id]||foodById[id])||!Number.isInteger(count)||count<1||count>2304){
+      chat('使用法 /give [@s] block|food [count]（1〜2304）');break;
+    }
+    if(!addInventoryItem(id,count,true)){chat('インベントリに空きがありません');break}
+    renderHotbar();if(!foodById[id])void ensureJavaBlock(id);
+    scheduleSave();chat(`${id} を ${count} 個入手しました`);break;
+  }
+  case 'clear':{
+    const tokens=parts[0]==='@s'?parts.slice(1):parts;
+    const id=tokens[0]?.replace(/^minecraft:/,'');
+    const maxCount=tokens.length===2?Number(tokens[1]):-1;
+    if(tokens.length>2||(id!==undefined&&!(byId[id]||foodById[id]))||!Number.isInteger(maxCount)||maxCount < -1){
+      chat('使用法 /clear [@s] [item] [maxCount]');break;
+    }
+    let remaining=maxCount===-1?Infinity:maxCount;
+    let affected=0;
+    for(const [items,counts] of inventoryContainers(true))for(let i=0;i<items.length;i++){
+      if(items[i]===AIR||counts[i]<=0||(id!==undefined&&items[i]!==id))continue;
+      const amount=maxCount===0?counts[i]:Math.min(counts[i],remaining);
+      affected+=amount;
+      if(maxCount===0)continue;
+      counts[i]-=amount;
+      remaining-=amount;
+      if(counts[i]===0)items[i]=AIR;
+      if(remaining===0)break;
+    }
+    if(maxCount!==0){renderHotbar();scheduleSave()}
+    chat(maxCount===0?`${affected} 個のアイテムが見つかりました`:`${affected} 個のアイテムを削除しました`);
+    break;
+  }
   case 'damage':{
     const [target,rawAmount]=parts;
     const amount=Number(rawAmount);
