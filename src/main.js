@@ -38,8 +38,8 @@ const FOODS = [
 const byId = Object.fromEntries(BLOCKS.map(b=>[b.id,b]));
 const foodById=Object.fromEntries(FOODS.map(food=>[food.id,food]));
 const CRAFTING_RECIPES=[
-  {id:'planks',name:'オークの板材 ×4',ingredients:{wood:1},amount:4},
-  {id:'crafting_table',name:'作業台',ingredients:{planks:4},amount:1},
+  {id:'planks',name:'オークの板材 ×4',pattern:['wood'],amount:4},
+  {id:'crafting_table',name:'作業台',pattern:['planks','planks','planks','planks'],amount:1},
 ];
 const WORLD_INDEX_KEY = 'maincraft.world.index';
 const WORLD_PREFIX = 'maincraft.world.';
@@ -118,7 +118,7 @@ function updateRain(dt){
   rainGeometry.attributes.position.needsUpdate=true;
 }
 let seed=1,seed64='1',seedString='',worldgenVersion=1,worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,doDaylightCycle=true,spawnPosition=null;
-let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),storageSlots=Array(27).fill(AIR),storageCounts=Array(27).fill(0),inventorySelection=null,selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
+let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),storageSlots=Array(27).fill(AIR),storageCounts=Array(27).fill(0),inventorySelection=null,craftGrid=Array(4).fill(AIR),selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 let playerHealth=20,playerDamageCooldown=0,fallDistance=0;
 let foodLevel=20,foodSaturation=5,foodExhaustion=0,foodTimer=0;
 const healthHud=document.createElement('div');
@@ -749,43 +749,52 @@ function collectBlock(id){
   counts[index]++;
   renderHotbar();
 }
-function craftRecipe(recipe){
-  const containers=[[slots,slotCounts],[storageSlots,storageCounts]];
-  const available={};
-  for(const [items,counts] of containers)for(let i=0;i<items.length;i++){
-    if(items[i]!==AIR)available[items[i]]=(available[items[i]]??0)+counts[i];
+function inventoryContainers(){return [[storageSlots,storageCounts],[slots,slotCounts]]}
+function addInventoryItem(id,quantity=1){
+  let remaining=quantity;
+  for(const [items,counts] of inventoryContainers())for(let i=0;i<items.length&&remaining>0;i++){
+    if(items[i]!==id||counts[i]>=64)continue;
+    const amount=Math.min(remaining,64-counts[i]);
+    counts[i]+=amount;
+    remaining-=amount;
   }
-  if(Object.entries(recipe.ingredients).some(([id,count])=>(available[id]??0)<count))return false;
-  const next=containers.map(([items,counts])=>[[...items],[...counts]]);
-  for(const [id,required] of Object.entries(recipe.ingredients)){
-    let remaining=required;
-    for(const [items,counts] of next)for(let i=0;i<items.length&&remaining>0;i++){
-      if(items[i]!==id)continue;
-      const taken=Math.min(remaining,counts[i]);
-      counts[i]-=taken;
-      remaining-=taken;
-      if(counts[i]===0)items[i]=AIR;
-    }
-  }
-  let remaining=recipe.amount;
-  for(const [items,counts] of next)for(let i=0;i<items.length&&remaining>0;i++){
-    if(items[i]!==recipe.id||counts[i]>=64)continue;
-    const added=Math.min(remaining,64-counts[i]);
-    counts[i]+=added;
-    remaining-=added;
-  }
-  for(const [items,counts] of next)for(let i=0;i<items.length&&remaining>0;i++){
+  for(const [items,counts] of inventoryContainers())for(let i=0;i<items.length&&remaining>0;i++){
     if(items[i]!==AIR&&counts[i]!==0)continue;
-    const added=Math.min(remaining,64);
-    items[i]=recipe.id;
-    counts[i]=added;
-    remaining-=added;
+    const amount=Math.min(remaining,64);
+    items[i]=id;
+    counts[i]=amount;
+    remaining-=amount;
   }
-  if(remaining>0)return false;
-  [[slots,slotCounts],[storageSlots,storageCounts]]=next;
-  renderHotbar();
-  renderInventory();
-  scheduleSave();
+  return remaining===0;
+}
+function craftingResult(){
+  const occupied=craftGrid.map((id,index)=>id===AIR?null:[index%2,Math.floor(index/2),id]).filter(Boolean);
+  if(!occupied.length)return null;
+  const minX=Math.min(...occupied.map(([x])=>x));
+  const minY=Math.min(...occupied.map(([,y])=>y));
+  const maxX=Math.max(...occupied.map(([x])=>x));
+  const maxY=Math.max(...occupied.map(([,y])=>y));
+  const pattern=[];
+  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++)pattern.push(craftGrid[y*2+x]);
+  return CRAFTING_RECIPES.find(recipe=>recipe.pattern.length===pattern.length&&recipe.pattern.every((id,i)=>id===pattern[i]))??null;
+}
+function craftRecipe(recipe){
+  if(craftingResult()!==recipe)return false;
+  const nextSlots=[...slots],nextCounts=[...slotCounts],nextStorage=[...storageSlots],nextStorageCounts=[...storageCounts];
+  // Reserve the recipe output before consuming inputs so a full inventory never loses materials.
+  const outputFits=[...nextSlots,...nextStorage].some((id,i)=>id===AIR||id===recipe.id&&[...nextCounts,...nextStorageCounts][i]<=64-recipe.amount);
+  if(!outputFits)return false;
+  for(let i=0;i<craftGrid.length;i++)craftGrid[i]=AIR;
+  if(!addInventoryItem(recipe.id,recipe.amount))throw Error('クラフト完成品を収納できません');
+  renderHotbar();renderInventory();scheduleSave();
+  return true;
+}
+function returnCraftGrid(){
+  for(let i=0;i<craftGrid.length;i++){
+    if(craftGrid[i]===AIR)continue;
+    if(!addInventoryItem(craftGrid[i]))return false;
+    craftGrid[i]=AIR;
+  }
   return true;
 }
 function $$(s){return [...document.querySelectorAll(s)]}
@@ -824,17 +833,32 @@ function renderInventory(query=''){
     });
     const crafting=$('#crafting');
     crafting.classList.remove('hidden');
-    crafting.innerHTML=`<h3>クラフト</h3>${CRAFTING_RECIPES.map((recipe,index)=>{
-      const owned=Object.entries(recipe.ingredients).every(([id,count])=>{
-        const total=[...slots,...storageSlots].reduce((sum,item,i)=>sum+(item===id?([...slotCounts,...storageCounts][i]??0):0),0);
-        return total>=count;
-      });
-      const materials=Object.entries(recipe.ingredients).map(([id,count])=>`${byId[id]?.name??id} ×${count}`).join(' + ');
-      return `<button class="craft-recipe" data-recipe="${index}" ${owned?'':'disabled'}>${materials} → ${recipe.name}</button>`;
-    }).join('')}`;
-    $$('.craft-recipe').forEach(button=>button.onclick=()=>{
-      if(!craftRecipe(CRAFTING_RECIPES[Number(button.dataset.recipe)]))notice('材料または空きスロットが不足しています');
+    const result=craftingResult();
+    crafting.innerHTML=`<h3>2×2 クラフト</h3><p>持ち物を選び、マスをタップすると材料を1個置きます。マスをもう一度タップすると戻せます。</p><div class="craft-layout"><div class="craft-grid">${craftGrid.map((id,i)=>{
+      const item=byId[id]??foodById[id];
+      return `<button class="craft-cell ${id!==AIR?'filled':''}" data-grid="${i}" aria-label="クラフト ${i+1} ${item?.name??'空'}">${item?.name??'＋'}</button>`;
+    }).join('')}</div><span class="craft-arrow">→</span><button id="craft-result" ${result?'':'disabled'}>${result?.name??'完成品'}</button></div>`;
+    $$('.craft-cell').forEach(button=>button.onclick=()=>{
+      const index=Number(button.dataset.grid);
+      if(craftGrid[index]!==AIR){
+        if(!addInventoryItem(craftGrid[index])){notice('持ち物に空きがありません');return}
+        craftGrid[index]=AIR;
+      }else if(inventorySelection!==null){
+        const from=inventorySelection<27?storageSlots:slots;
+        const counts=inventorySelection<27?storageCounts:slotCounts;
+        const slot=inventorySelection<27?inventorySelection:inventorySelection-27;
+        if(from[slot]!==AIR&&counts[slot]>0){
+          craftGrid[index]=from[slot];
+          counts[slot]--;
+          if(counts[slot]===0)from[slot]=AIR;
+        }
+      }
+      inventorySelection=null;
+      renderHotbar();renderInventory();scheduleSave();
     });
+    $('#craft-result').onclick=()=>{
+      if(!craftRecipe(craftingResult()))notice('完成品を収納できません');
+    };
     return;
   }
   $('#crafting').classList.add('hidden');
@@ -865,7 +889,13 @@ function openInventory(){
   if(!isTouchDevice)$('#itemsearch').focus();
 }
 $('#itemsearch').addEventListener('input',e=>renderInventory(e.target.value.trim()));
-function closeInventory(){inventoryOpen=false;$('#inventory').classList.add('hidden');if(active&&!paused)lockPointer()}
+function closeInventory(){
+  if(mode==='survival'&&!returnCraftGrid()){notice('クラフト材料を戻す空きがありません');return}
+  inventoryOpen=false;
+  $('#inventory').classList.add('hidden');
+  renderHotbar();scheduleSave();
+  if(active&&!paused)lockPointer();
+}
 $('#closeinv').onclick=closeInventory;
 function pause(){if(!active)return;paused=true;document.exitPointerLock?.();$('#pause').classList.remove('hidden')}
 function unpause(){paused=false;$('#pause').classList.add('hidden');lockPointer()}

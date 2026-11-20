@@ -46,6 +46,13 @@ html,body,#app,#game{overscroll-behavior:none}
 #crafting h3{margin:0 0 9px;font-size:14px}
 .craft-recipe{display:block;width:100%;margin:6px 0;padding:10px;background:#ffffff17;border:1px solid #ffffff30;border-radius:7px;color:white;text-align:left}
 .craft-recipe:disabled{opacity:.4;cursor:default}
+.craft-layout{display:flex;align-items:center;gap:14px;justify-content:center}
+.craft-grid{display:grid;grid-template-columns:repeat(2,minmax(64px,90px));gap:6px}
+.craft-cell,#craft-result{min-height:54px;padding:7px;background:#ffffff17;border:1px solid #ffffff55;border-radius:6px;color:white;font-size:11px}
+.craft-cell.filled{background:#63894c55}
+#craft-result{min-width:95px;max-width:135px}
+#craft-result:disabled{opacity:.4}
+.craft-arrow{font-size:20px}
 #inventory:has(.inventory-cell) .items{grid-template-columns:repeat(9,minmax(0,1fr));gap:4px}
 #inventory:has(.inventory-cell) .inventory-panel{width:min(690px,calc(100vw - 18px))}
 .assetstatus{font-size:11px;line-height:1.5;color:#c5d7cb;text-align:left;padding:7px 0;overflow-wrap:anywhere}
