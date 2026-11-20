@@ -7,6 +7,7 @@ const types={
   zombie:{body:0x407c63,head:0x6ca87b,legs:0x374a87,height:1.8,upright:true},
   creeper:{body:0x65a844,head:0x65a844,legs:0x4d8d35,height:1.7,upright:true},
 };
+const maximumHealth={pig:10,cow:10,sheep:8,zombie:20,creeper:20};
 const box=new THREE.BoxGeometry(1,1,1);
 const materials=new Map();
 function material(color){
@@ -39,7 +40,7 @@ export class MobWorld {
     this.entities.length=0;
   }
 
-  spawn(type,x,y,z,id=crypto.randomUUID()){
+  spawn(type,x,y,z,id=crypto.randomUUID(),health=maximumHealth[type]){
     if(!MobWorld.supports(type)||![x,y,z].every(Number.isFinite))return null;
     if(this.entities.length>=128)return null;
     const config=types[type];
@@ -72,7 +73,7 @@ export class MobWorld {
     }
     group.userData.entityId=id;
     this.root.add(group);
-    const entity={id,type,x,y,z,group,legs,phase:Math.random()*Math.PI*2,heading:Math.random()*Math.PI*2,decisionTime:0,walking:false};
+    const entity={id,type,x,y,z,health:Number.isFinite(health)?Math.max(1,Math.min(health,maximumHealth[type])):maximumHealth[type],group,legs,phase:Math.random()*Math.PI*2,heading:Math.random()*Math.PI*2,decisionTime:0,walking:false,attackCooldown:0};
     this.entities.push(entity);
     return entity;
   }
@@ -81,6 +82,13 @@ export class MobWorld {
     if(!entity||!this.entities.includes(entity))return;
     this.root.remove(entity.group);
     this.entities.splice(this.entities.indexOf(entity),1);
+  }
+
+  damage(entity,amount){
+    if(!entity||!this.entities.includes(entity))return false;
+    entity.health-=amount;
+    if(entity.health<=0){this.remove(entity);return true}
+    return false;
   }
 
   entityForObject(object){
@@ -92,13 +100,13 @@ export class MobWorld {
     return null;
   }
 
-  save(){return this.entities.map(({id,type,x,y,z})=>({id,type,x,y,z}))}
+  save(){return this.entities.map(({id,type,x,y,z,health})=>({id,type,x,y,z,health}))}
 
   restore(data){
     this.clear();
     if(!Array.isArray(data))return;
     for(const entry of data.slice(0,128)){
-      if(entry&&typeof entry==='object')this.spawn(entry.type,entry.x,entry.y,entry.z,entry.id);
+      if(entry&&typeof entry==='object')this.spawn(entry.type,entry.x,entry.y,entry.z,entry.id,entry.health);
     }
   }
 
@@ -112,12 +120,17 @@ export class MobWorld {
     return null;
   }
 
-  update(dt,elapsed,player){
+  update(dt,elapsed,player,onAttack){
     for(const entity of this.entities){
       // Keep distant mobs stationary, reducing animation cost on phones.
       if(Math.hypot(entity.x-player.x,entity.z-player.z)>40)continue;
       const playerDistance=Math.hypot(entity.x-player.x,entity.z-player.z);
       const chasing=entity.type==='zombie'&&playerDistance<12&&Math.abs(entity.y-player.y)<5;
+      entity.attackCooldown=Math.max(0,entity.attackCooldown-dt);
+      if(chasing&&playerDistance<1.7&&entity.attackCooldown===0){
+        entity.attackCooldown=1.1;
+        onAttack?.(3,entity);
+      }
       entity.decisionTime-=dt;
       if(chasing){
         entity.heading=Math.atan2(player.x-entity.x,-(player.z-entity.z));
