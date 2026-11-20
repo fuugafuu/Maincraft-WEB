@@ -1099,19 +1099,24 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked] [normal|force|move] /give block /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked] [normal|force|move] /give block /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;fallDistance=0;grounded=false;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
   case 'fill':{
-    const a=xyz(),b=xyz(3),id=parts[6]?.replace('minecraft:',''),action=parts[7]||'replace';
-    if(!inWorld(a)||!inWorld(b)||!(id===AIR||byId[id])||!['replace','keep','hollow','outline'].includes(action)){chat('使用法 /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline]');break}
+    const a=xyz(),b=xyz(3),id=parts[6]?.replace(/^minecraft:/,''),action=parts[7]||'replace';
+    const filter=parts[8]?.replace(/^minecraft:/,'');
+    if(!inWorld(a)||!inWorld(b)||!(id===AIR||byId[id])||!['replace','keep','hollow','outline'].includes(action)||
+       (filter!==undefined&&(action!=='replace'||!(filter===AIR||byId[filter])))||parts.length>9){
+      chat('使用法 /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline]');break;
+    }
     if(volume(a,b)>4096){chat('一度に変更できるのは4096ブロックまでです');break}
     const [[minX,maxX],[minY,maxY],[minZ,maxZ]]=bounds(a,b),changed=[];
     for(let x=minX;x<=maxX;x++)for(let z=minZ;z<=maxZ;z++)for(let y=minY;y<=maxY;y++){
       const edge=x===minX||x===maxX||y===minY||y===maxY||z===minZ||z===maxZ;
       if(action==='outline'&&!edge)continue;
       if(action==='keep'&&getBlock(x,y,z)!==AIR)continue;
+      if(filter!==undefined&&getBlock(x,y,z)!==filter)continue;
       const next=action==='hollow'&&!edge?AIR:id;
       if(getBlock(x,y,z)===next)continue;
       writeBlock(x,y,z,next);changed.push([x,y,z]);
