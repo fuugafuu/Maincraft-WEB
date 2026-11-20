@@ -45,7 +45,7 @@ const keys=new Set();const raycaster=new THREE.Raycaster();raycaster.far=7;
 const clamp=THREE.MathUtils.clamp;const key=(x,y,z)=>`${x},${y},${z}`;
 function hash(x,z,s=seed){let n=Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,1442695041);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295}
 function noise(x,z,scale){const a=Math.floor(x/scale),b=Math.floor(z/scale),u=x/scale-a,v=z/scale-b;const t=u*u*(3-2*u),w=v*v*(3-2*v);const ab=(n,m)=>hash(n,m);return THREE.MathUtils.lerp(THREE.MathUtils.lerp(ab(a,b),ab(a+1,b),t),THREE.MathUtils.lerp(ab(a,b+1),ab(a+1,b+1),t),w)}
-const heightCache=new Map(),treeCache=new Map();
+const heightCache=new Map(),treeCache=new Map(),treeColumnCache=new Map();
 function height(x,z){
   const position=`${x},${z}`;
   if(heightCache.has(position))return heightCache.get(position);
@@ -62,7 +62,35 @@ function treeAt(x,z){
   treeCache.set(position,hasTree);
   return hasTree;
 }
-function generatedBlock(x,y,z){if(y<0)return AIR;if(y===0)return 'bedrock';const h=height(x,z);if(y>h+9)return AIR;if(y<=h){if(y===h)return surface(x,z);if(y>h-4)return surface(x,z)==='sand'?'sand':'dirt';return 'stone'}for(let tx=x-2;tx<=x+2;tx++)for(let tz=z-2;tz<=z+2;tz++){if(!treeAt(tx,tz))continue;const base=height(tx,tz);const len=4+Math.floor(hash(tx,tz,seed+20)*3);if(x===tx&&z===tz&&y>base&&y<=base+len)return 'wood';const dx=Math.abs(x-tx),dz=Math.abs(z-tz),dy=y-(base+len);if(dx<=2&&dz<=2&&dy>=-2&&dy<=2&&dx+dz+Math.abs(dy)*.4<4.3)return 'leaves'}return AIR}
+function treesForColumn(x,z){
+  const position=`${x},${z}`;
+  if(treeColumnCache.has(position))return treeColumnCache.get(position);
+  const trees=[];
+  for(let tx=x-2;tx<=x+2;tx++)for(let tz=z-2;tz<=z+2;tz++){
+    if(!treeAt(tx,tz))continue;
+    const base=height(tx,tz);
+    trees.push({dx:Math.abs(x-tx),dz:Math.abs(z-tz),base,top:base+4+Math.floor(hash(tx,tz,seed+20)*3)});
+  }
+  treeColumnCache.set(position,trees);
+  return trees;
+}
+function generatedBlock(x,y,z){
+  if(y<0)return AIR;
+  if(y===0)return 'bedrock';
+  const h=height(x,z);
+  if(y>h+9)return AIR;
+  if(y<=h){
+    if(y===h)return surface(x,z);
+    if(y>h-4)return surface(x,z)==='sand'?'sand':'dirt';
+    return 'stone';
+  }
+  for(const tree of treesForColumn(x,z)){
+    if(tree.dx===0&&tree.dz===0&&y>tree.base&&y<=tree.top)return 'wood';
+    const dy=y-tree.top;
+    if(dy>=-2&&dy<=2&&tree.dx+tree.dz+Math.abs(dy)*.4<4.3)return 'leaves';
+  }
+  return AIR;
+}
 function getBlock(x,y,z){x=Math.floor(x);y=Math.floor(y);z=Math.floor(z);return savedEdits.get(key(x,y,z))??generatedBlock(x,y,z)}
 function setBlock(x,y,z,id){if(y<1||y>100)return;const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else savedEdits.set(k,id);for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz)}scheduleSave()}
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
@@ -167,9 +195,9 @@ function loadNextChunk(){
 function saveData(){if(!active)return;const obj={version:1,worldName,seedString,seed,mode,edits:[...savedEdits],slots,position:location,timeOfDay};try{localStorage.setItem('maincraft.world',JSON.stringify(obj))}catch{notice('保存容量の上限に達しました')}}let saveTimer;function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveData,900)}
 function stringSeed(s){if(!s)return Math.floor(Math.random()*2147483647);if(/^-?\d+$/.test(s))return Number(BigInt.asIntN(32,BigInt(s)));let h=0;for(const ch of s)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;return h}
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
+function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const seed=stringSeed(seedString);newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(seed),seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
-function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();return n}
+function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();treeColumnCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();treeColumnCache.clear();return n}
 $('#resume').onclick=()=>{try{const data=JSON.parse(localStorage.getItem('maincraft.world'));if(!data)throw Error();newWorld(data)}catch{notice('保存されたワールドがありません');alert('保存されたワールドがありません')}};
 function registerBlock(id){
   if(byId[id])return;
