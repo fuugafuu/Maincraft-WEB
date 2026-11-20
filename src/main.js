@@ -150,6 +150,26 @@ function biome(x,z){
   biomeCache.set(position,result);
   return result;
 }
+function locateBiome(target,x,z){
+  const originX=Math.floor(x/16)*16,originZ=Math.floor(z/16)*16;
+  for(let radius=0;radius<=64;radius++){
+    let nearest=null,nearestDistance=Infinity;
+    for(let dx=-radius;dx<=radius;dx++)for(const dz of radius===0?[0]:[-radius,radius]){
+      const px=originX+dx*16,pz=originZ+dz*16;
+      if(biome(px,pz)!==target)continue;
+      const distance=(px-x)**2+(pz-z)**2;
+      if(distance<nearestDistance){nearest={x:px,z:pz};nearestDistance=distance}
+    }
+    for(let dz=-radius+1;dz<radius;dz++)for(const dx of [-radius,radius]){
+      const px=originX+dx*16,pz=originZ+dz*16;
+      if(biome(px,pz)!==target)continue;
+      const distance=(px-x)**2+(pz-z)**2;
+      if(distance<nearestDistance){nearest={x:px,z:pz};nearestDistance=distance}
+    }
+    if(nearest)return nearest;
+  }
+  return null;
+}
 function height(x,z){
   const position=`${x},${z}`;
   if(heightCache.has(position))return heightCache.get(position);
@@ -613,7 +633,7 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /time set day|night|noon|midnight /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /time set day|night|noon|midnight /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome>');break;
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
@@ -669,7 +689,16 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     updateChunks();scheduleSave();
     chat('スポーン地点に戻りました');break;
   }
-  case 'locate':chat('構造物の探索は今後実装予定です');break;
+  case 'locate':{
+    const target=parts[1]?.replace(/^minecraft:/,'');
+    if(parts[0]!=='biome'||!['plains','forest','desert','snowy_plains','mountains'].includes(target)||parts.length!==2){chat('使用法 /locate biome plains|forest|desert|snowy_plains|mountains');break}
+    if(worldgenVersion<4&&target!=='plains'){chat('このワールドには指定したバイオームがありません');break}
+    const found=locateBiome(target,location.x,location.z);
+    if(!found){chat(`1024ブロック以内に ${target} が見つかりませんでした`);break}
+    const distance=Math.round(Math.hypot(found.x-location.x,found.z-location.z));
+    chat(`${target} の位置 [${found.x}, ~, ${found.z}] (${distance} ブロック先)`);
+    break;
+  }
   default:chat(`不明なコマンド: /${cmd}。/help を参照してください`)} }
 function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.cos(a);sun.position.set(location.x+Math.sin(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
 if(isTouchDevice){
