@@ -8,6 +8,10 @@ const BLOCKS = [
   {id:'grass',name:'草ブロック',color:0x699b46,top:0x83b85a,side:0x806343},
   {id:'dirt',name:'土',color:0x806043},
   {id:'stone',name:'石',color:0x8f9291},
+  {id:'coal_ore',name:'石炭鉱石',color:0x727776},
+  {id:'iron_ore',name:'鉄鉱石',color:0xa89483},
+  {id:'gold_ore',name:'金鉱石',color:0xab9561},
+  {id:'diamond_ore',name:'ダイヤモンド鉱石',color:0x659f9b},
   {id:'sand',name:'砂',color:0xd9c68b},
   {id:'wood',name:'オークの原木',color:0x795334,top:0xac895e},
   {id:'leaves',name:'葉',color:0x3c8140,transparent:true},
@@ -121,6 +125,15 @@ function isCave(x,y,z,h){
   if(worldgenVersion<2||y<3||y>h-5)return false;
   return noise3(x,y*1.3,z,17)>.67&&noise3(x+113,y*1.3-47,z-79,9)>.43;
 }
+function generatedOre(x,y,z,h){
+  if(worldgenVersion<3)return 'stone';
+  // Distinct seeded 3D fields create continuous veins in the surrounding stone.
+  if(y<13&&noise3(x+419,y*1.5,z-271,5)>.87)return 'diamond_ore';
+  if(y<18&&noise3(x-297,y*1.2,z+83,6)>.84)return 'gold_ore';
+  if(y<25&&noise3(x+151,y,z+367,7)>.81)return 'iron_ore';
+  if(y<h-3&&noise3(x-71,y,z-193,8)>.79)return 'coal_ore';
+  return 'stone';
+}
 const heightCache=new Map(),treeCache=new Map(),treeColumnCache=new Map();
 function height(x,z){
   const position=`${x},${z}`;
@@ -159,7 +172,7 @@ function generatedBlock(x,y,z){
     if(isCave(x,y,z,h))return AIR;
     if(y===h)return surface(x,z);
     if(y>h-4)return surface(x,z)==='sand'?'sand':'dirt';
-    return 'stone';
+    return generatedOre(x,y,z,h);
   }
   if(y<=SEA)return 'water';
   for(const tree of treesForColumn(x,z)){
@@ -410,7 +423,7 @@ function validateImportedWorld(data){
   if(typeof data.worldName!=='string'||!data.worldName.trim()||data.worldName.length>100)return false;
   if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
   if(data.seed64!==undefined&&(typeof data.seed64!=='string'||!isSignedLong(data.seed64)))return false;
-  if(data.worldgenVersion!==undefined&&![1,2].includes(data.worldgenVersion))return false;
+  if(data.worldgenVersion!==undefined&&![1,2,3].includes(data.worldgenVersion))return false;
   if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
   if(!data.edits.every(entry=>Array.isArray(entry)&&entry.length===2&&/^[-]?\d+,[-]?\d+,[-]?\d+$/.test(entry[0])&&typeof entry[1]==='string'&&entry[1].length<=100))return false;
   const position=data.position;
@@ -455,7 +468,7 @@ function stringSeed(s){
 }
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
 function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
-$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:2,seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
+$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:3,seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
 function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();treeColumnCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();treeColumnCache.clear();return n}
 $('#resume').onclick=showWorlds;
 function registerBlock(id){
@@ -490,7 +503,7 @@ async function importJavaJar(file){
     for(const name of imported.blockNames)registerBlock(name);
     const old=javaResources;
     javaResources=imported;
-    for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock'])){
+    for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock','coal_ore','iron_ore','gold_ore','diamond_ore'])){
       await javaResources.ensure(id);
     }
     for(const id of new Set([...savedEdits.values()])){
