@@ -135,6 +135,39 @@ let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','wat
 let chestContents=new Map(),openChestKey=null;
 let playerHealth=20,playerDamageCooldown=0,fallDistance=0;
 let foodLevel=20,foodSaturation=5,foodExhaustion=0,foodTimer=0;
+const SUPPORTED_EFFECTS=new Set(['speed','slowness','jump_boost','regeneration','resistance','weakness']);
+let playerEffects={};
+let regenerationTimer=0;
+const effectHud=document.createElement('div');
+effectHud.id='effects';
+$('#bottom').prepend(effectHud);
+function effectLevel(id){return playerEffects[id]?.amplifier??-1}
+function renderEffects(){
+  effectHud.replaceChildren();
+  for(const [id,value] of Object.entries(playerEffects)){
+    const line=document.createElement('div');
+    line.textContent=`${id.replaceAll('_',' ')} ${value.amplifier+1} · ${Math.ceil(value.seconds)}s`;
+    effectHud.appendChild(line);
+  }
+}
+function updateEffects(dt){
+  let changed=false;
+  for(const [id,value] of Object.entries(playerEffects)){
+    value.seconds-=dt;
+    if(value.seconds<=0){delete playerEffects[id];changed=true}
+  }
+  if(effectLevel('regeneration')>=0&&mode==='survival'&&playerHealth<20){
+    regenerationTimer+=dt;
+    const interval=Math.max(.05,2.5/2**effectLevel('regeneration'));
+    if(regenerationTimer>=interval){
+      regenerationTimer%=interval;
+      playerHealth=Math.min(20,playerHealth+1);
+      updateHealthHud();changed=true;
+    }
+  }else regenerationTimer=0;
+  if(changed)scheduleSave();
+  renderEffects();
+}
 const healthHud=document.createElement('div');
 healthHud.id='health';
 $('#bottom').prepend(healthHud);
@@ -187,6 +220,7 @@ function respawn(){
   grounded=false;
   fallDistance=0;
   playerHealth=20;
+  playerEffects={};regenerationTimer=0;renderEffects();
   foodLevel=20;foodSaturation=5;foodExhaustion=0;foodTimer=0;
   playerDamageCooldown=1.5;
   updateHealthHud();
@@ -196,6 +230,7 @@ function respawn(){
 }
 function damagePlayer(amount){
   if(mode!=='survival'||playerDamageCooldown>0)return;
+  if(effectLevel('resistance')>=0)amount*=Math.max(0,1-.2*(effectLevel('resistance')+1));
   playerHealth=Math.max(0,playerHealth-amount);
   playerDamageCooldown=.65;
   updateHealthHud();
@@ -578,7 +613,7 @@ function readWorldIndex(){
 }
 function saveData(){
   if(!active || !worldId)return;
-  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,playerHealth,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],slots,slotCounts,selected,storageSlots,storageCounts,craftGrid,craftingTableOpen,chestContents:[...chestContents],position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
+  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,playerHealth,playerEffects,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],slots,slotCounts,selected,storageSlots,storageCounts,craftGrid,craftingTableOpen,chestContents:[...chestContents],position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
   try {
     localStorage.setItem(WORLD_PREFIX+worldId,JSON.stringify(obj));
     const index=readWorldIndex().filter(item=>item.id!==worldId);
@@ -645,6 +680,7 @@ function validateImportedWorld(data){
   if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
   if(data.seed64!==undefined&&(typeof data.seed64!=='string'||!isSignedLong(data.seed64)))return false;
   if(data.playerHealth!==undefined&&(!Number.isInteger(data.playerHealth)||data.playerHealth<1||data.playerHealth>20))return false;
+  if(data.playerEffects!==undefined&&(!data.playerEffects||typeof data.playerEffects!=='object'||Array.isArray(data.playerEffects)||Object.keys(data.playerEffects).length>SUPPORTED_EFFECTS.size||Object.entries(data.playerEffects).some(([id,value])=>!SUPPORTED_EFFECTS.has(id)||!value||!Number.isFinite(value.seconds)||value.seconds<=0||value.seconds>1000000||!Number.isInteger(value.amplifier)||value.amplifier<0||value.amplifier>4)))return false;
   if(data.slots!==undefined&&(!Array.isArray(data.slots)||data.slots.length!==9||!data.slots.every(id=>typeof id==='string'&&id.length<=100)))return false;
   if(data.foodLevel!==undefined&&(!Number.isInteger(data.foodLevel)||data.foodLevel<0||data.foodLevel>20))return false;
   if(data.foodSaturation!==undefined&&(!Number.isFinite(data.foodSaturation)||data.foodSaturation<0||data.foodSaturation>20))return false;
@@ -719,7 +755,7 @@ function lockPointer(){
   const request=renderer.domElement.requestPointerLock?.();
   request?.catch?.(()=>{});
 }
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed64=data.seed64??String(data.seed);worldgenVersion=data.worldgenVersion??1;seed=terrainSeed(BigInt(seed64),worldgenVersion);heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);selected=Number.isInteger(data.selected)&&data.selected>=0&&data.selected<9?data.selected:0;storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;craftingTableOpen=mode==="survival"&&data.craftingTableOpen===true&&Array.isArray(data.craftGrid)&&data.craftGrid.length===9;craftGrid=Array.isArray(data.craftGrid)&&data.craftGrid.length===(craftingTableOpen?9:4)?data.craftGrid.map(id=>typeof id==="string"?id:AIR):Array(4).fill(AIR);inventoryOpen=false;openChestKey=null;chestContents=new Map(Array.isArray(data.chestContents)?data.chestContents:[]);$("#inventory").classList.add("hidden");savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed64=data.seed64??String(data.seed);worldgenVersion=data.worldgenVersion??1;seed=terrainSeed(BigInt(seed64),worldgenVersion);heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;playerEffects=Object.fromEntries(Object.entries(data.playerEffects??{}).filter(([id,value])=>SUPPORTED_EFFECTS.has(id)&&value.seconds>0));regenerationTimer=0;renderEffects();foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);selected=Number.isInteger(data.selected)&&data.selected>=0&&data.selected<9?data.selected:0;storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;craftingTableOpen=mode==="survival"&&data.craftingTableOpen===true&&Array.isArray(data.craftGrid)&&data.craftGrid.length===9;craftGrid=Array.isArray(data.craftGrid)&&data.craftGrid.length===(craftingTableOpen?9:4)?data.craftGrid.map(id=>typeof id==="string"?id:AIR):Array(4).fill(AIR);inventoryOpen=false;openChestKey=null;chestContents=new Map(Array.isArray(data.chestContents)?data.chestContents:[]);$("#inventory").classList.add("hidden");savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));const survival=$('#mode').value==='survival';newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:6,seed:terrainSeed(longSeed,6),mode:$('#mode').value,edits:[],slots:survival?Array(9).fill(AIR):['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts:Array(9).fill(survival?0:64)})};
 $('#resume').onclick=showWorlds;
 function registerBlock(id, name=id.replaceAll('_',' ')){
@@ -1103,7 +1139,7 @@ function interact(place){
   if(!hit){if(place)eatSelectedFood();return}
   const entity=mobs.entityForObject(hit.object);
   if(entity){
-    if(!place){const killed=mobs.damage(entity,mode==='creative'?20:4);scheduleSave();notice(killed?`${entity.type} を倒しました`:`${entity.type} HP ${entity.health}`)}
+    if(!place){const damage=mode==='creative'?20:Math.max(0,4-4*(effectLevel('weakness')+1));const killed=mobs.damage(entity,damage);scheduleSave();notice(killed?`${entity.type} を倒しました`:`${entity.type} HP ${entity.health}`)}
     return;
   }
   const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld).round();
@@ -1180,7 +1216,21 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block [count] /clear [@s] [item] [maxCount] /item replace entity @s <slot> with <item> [count] /item replace block x y z container.N with <item> [count] /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block [count] /clear [@s] [item] [maxCount] /item replace entity @s <slot> with <item> [count] /item replace block x y z container.N with <item> [count] /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /effect give @s <effect> [seconds] [amplifier] /effect clear @s [effect] /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  case 'effect':{
+    const [action,target,idInput,secondsInput,amplifierInput]=parts;
+    const id=idInput?.replace(/^minecraft:/,'');
+    if(action==='clear'&&target==='@s'&&parts.length<=3&&(id===undefined||SUPPORTED_EFFECTS.has(id))){
+      if(id)delete playerEffects[id];else playerEffects={};
+      regenerationTimer=0;renderEffects();scheduleSave();chat(id?`${id} の効果を解除しました`:'すべての効果を解除しました');break;
+    }
+    const seconds=secondsInput===undefined?30:Number(secondsInput);
+    const amplifier=amplifierInput===undefined?0:Number(amplifierInput);
+    if(action==='give'&&target==='@s'&&SUPPORTED_EFFECTS.has(id)&&parts.length<=5&&Number.isInteger(seconds)&&seconds>=1&&seconds<=1000000&&Number.isInteger(amplifier)&&amplifier>=0&&amplifier<=4){
+      playerEffects[id]={seconds,amplifier};regenerationTimer=0;renderEffects();scheduleSave();chat(`${id} ${amplifier+1} を ${seconds} 秒間付与しました`);break;
+    }
+    chat('使用法 /effect give @s <speed|slowness|jump_boost|regeneration|resistance|weakness> [seconds] [amplifier] または /effect clear @s [effect]');break;
+  }
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;fallDistance=0;grounded=false;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
@@ -1465,7 +1515,7 @@ if(isTouchDevice){
   }
 }
 let last=performance.now(),frames=0,fps=0,second=0,daylightRefresh=0,worldAutosave=0;
-function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const sprinting=(keys.has('ShiftLeft')||keys.has('ShiftRight'))&&(mode==='creative'||foodLevel>6);const speed=sprinting?10:5.4;const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();updateEffects(dt);const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const sprinting=(keys.has('ShiftLeft')||keys.has('ShiftRight'))&&(mode==='creative'||foodLevel>6);const speed=(sprinting?10:5.4)*Math.max(.1,1+(effectLevel('speed')+1)*.2-(effectLevel('slowness')+1)*.15);const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
     updateHunger(dt,!!(forward||strafe),sprinting);
     playerDamageCooldown=Math.max(0,playerDamageCooldown-dt);
     mobs.update(dt,now/1000,location,damagePlayer);
@@ -1486,7 +1536,7 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
         if(keys.has('ControlLeft'))vy=Math.max(-3.4,vy-18*dt);
         vy*=Math.pow(.82,dt*20);
       }else{
-        if(keys.has('Space')&&grounded){vy=8.2;grounded=false}
+        if(keys.has('Space')&&grounded){vy=8.2+Math.max(0,effectLevel('jump_boost')+1)*1.3;grounded=false}
         vy-=22*dt;
       }
       const previousY=location.y;
