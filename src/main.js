@@ -18,6 +18,7 @@ const BLOCKS = [
   {id:'wood',name:'オークの原木',color:0x795334,top:0xac895e},
   {id:'leaves',name:'葉',color:0x3c8140,transparent:true},
   {id:'planks',name:'オークの板材',color:0xbc8e52},
+  {id:'crafting_table',name:'作業台',color:0xa67843},
   {id:'glass',name:'ガラス',color:0xb8e7e9,transparent:true},
   {id:'bricks',name:'レンガ',color:0xa55445},
   {id:'cobble',name:'丸石',color:0x777e7b},
@@ -36,6 +37,10 @@ const FOODS = [
 ];
 const byId = Object.fromEntries(BLOCKS.map(b=>[b.id,b]));
 const foodById=Object.fromEntries(FOODS.map(food=>[food.id,food]));
+const CRAFTING_RECIPES=[
+  {id:'planks',name:'オークの板材 ×4',ingredients:{wood:1},amount:4},
+  {id:'crafting_table',name:'作業台',ingredients:{planks:4},amount:1},
+];
 const WORLD_INDEX_KEY = 'maincraft.world.index';
 const WORLD_PREFIX = 'maincraft.world.';
 let worldId = null;
@@ -744,6 +749,45 @@ function collectBlock(id){
   counts[index]++;
   renderHotbar();
 }
+function craftRecipe(recipe){
+  const containers=[[slots,slotCounts],[storageSlots,storageCounts]];
+  const available={};
+  for(const [items,counts] of containers)for(let i=0;i<items.length;i++){
+    if(items[i]!==AIR)available[items[i]]=(available[items[i]]??0)+counts[i];
+  }
+  if(Object.entries(recipe.ingredients).some(([id,count])=>(available[id]??0)<count))return false;
+  const next=containers.map(([items,counts])=>[[...items],[...counts]]);
+  for(const [id,required] of Object.entries(recipe.ingredients)){
+    let remaining=required;
+    for(const [items,counts] of next)for(let i=0;i<items.length&&remaining>0;i++){
+      if(items[i]!==id)continue;
+      const taken=Math.min(remaining,counts[i]);
+      counts[i]-=taken;
+      remaining-=taken;
+      if(counts[i]===0)items[i]=AIR;
+    }
+  }
+  let remaining=recipe.amount;
+  for(const [items,counts] of next)for(let i=0;i<items.length&&remaining>0;i++){
+    if(items[i]!==recipe.id||counts[i]>=64)continue;
+    const added=Math.min(remaining,64-counts[i]);
+    counts[i]+=added;
+    remaining-=added;
+  }
+  for(const [items,counts] of next)for(let i=0;i<items.length&&remaining>0;i++){
+    if(items[i]!==AIR&&counts[i]!==0)continue;
+    const added=Math.min(remaining,64);
+    items[i]=recipe.id;
+    counts[i]=added;
+    remaining-=added;
+  }
+  if(remaining>0)return false;
+  [[slots,slotCounts],[storageSlots,storageCounts]]=next;
+  renderHotbar();
+  renderInventory();
+  scheduleSave();
+  return true;
+}
 function $$(s){return [...document.querySelectorAll(s)]}
 function notice(msg){const el=$('#notice');el.textContent=msg;el.classList.add('show');clearTimeout(notice.timeout);notice.timeout=setTimeout(()=>el.classList.remove('show'),2400)}
 function renderInventory(query=''){
@@ -778,8 +822,22 @@ function renderInventory(query=''){
       }
       renderInventory();
     });
+    const crafting=$('#crafting');
+    crafting.classList.remove('hidden');
+    crafting.innerHTML=`<h3>クラフト</h3>${CRAFTING_RECIPES.map((recipe,index)=>{
+      const owned=Object.entries(recipe.ingredients).every(([id,count])=>{
+        const total=[...slots,...storageSlots].reduce((sum,item,i)=>sum+(item===id?([...slotCounts,...storageCounts][i]??0):0),0);
+        return total>=count;
+      });
+      const materials=Object.entries(recipe.ingredients).map(([id,count])=>`${byId[id]?.name??id} ×${count}`).join(' + ');
+      return `<button class="craft-recipe" data-recipe="${index}" ${owned?'':'disabled'}>${materials} → ${recipe.name}</button>`;
+    }).join('')}`;
+    $$('.craft-recipe').forEach(button=>button.onclick=()=>{
+      if(!craftRecipe(CRAFTING_RECIPES[Number(button.dataset.recipe)]))notice('材料または空きスロットが不足しています');
+    });
     return;
   }
+  $('#crafting').classList.add('hidden');
   const matches=[...BLOCKS.filter(b=>b.id!=='bedrock'),...FOODS].filter(b=>b.id.includes(query.toLowerCase())||b.name.includes(query));
   $('#itemcount').textContent=`${matches.length} items · displaying ${Math.min(matches.length,120)}`;
   $('#items').innerHTML=matches.slice(0,120).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="background:#${b.color.toString(16).padStart(6,'0')}"></i>${b.name}</button>`).join('');
@@ -798,6 +856,7 @@ function openInventory(){
   inventorySelection=null;
   document.exitPointerLock?.();
   $('#inventory').classList.remove('hidden');
+  if(!$('#crafting'))$('#items').insertAdjacentHTML('afterend','<section id="crafting" class="hidden"></section>');
   $('#inventory h2').textContent=mode==='survival'?'インベントリ':'ブロックとアイテム';
   $('#inventory p').textContent=mode==='survival'?'持ち物とホットバーのアイテムを入れ替えます。':'選択するとホットバーの現在のスロットにセットします。';
   $('#itemsearch').classList.toggle('hidden',mode==='survival');
