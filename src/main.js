@@ -98,12 +98,29 @@ function updateRain(dt){
   rain.position.set(location.x,location.y,location.z);
   rainGeometry.attributes.position.needsUpdate=true;
 }
-let seed=1,seed64='1',seedString='',worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,spawnPosition=null;
+let seed=1,seed64='1',seedString='',worldgenVersion=1,worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,spawnPosition=null;
 let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 const keys=new Set();const raycaster=new THREE.Raycaster();raycaster.far=7;
 const clamp=THREE.MathUtils.clamp;const key=(x,y,z)=>`${x},${y},${z}`;
 function hash(x,z,s=seed){let n=Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,1442695041);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295}
 function noise(x,z,scale){const a=Math.floor(x/scale),b=Math.floor(z/scale),u=x/scale-a,v=z/scale-b;const t=u*u*(3-2*u),w=v*v*(3-2*v);const ab=(n,m)=>hash(n,m);return THREE.MathUtils.lerp(THREE.MathUtils.lerp(ab(a,b),ab(a+1,b),t),THREE.MathUtils.lerp(ab(a,b+1),ab(a+1,b+1),t),w)}
+function hash3(x,y,z){
+  let n=Math.imul(x,374761393)^Math.imul(y,668265263)^Math.imul(z,1442695041)^Math.imul(seed,1274126177);
+  n=Math.imul(n^(n>>>13),1274126177);
+  return ((n^(n>>>16))>>>0)/4294967295;
+}
+function noise3(x,y,z,scale){
+  const a=Math.floor(x/scale),b=Math.floor(y/scale),c=Math.floor(z/scale);
+  const smooth=t=>t*t*(3-2*t),u=smooth(x/scale-a),v=smooth(y/scale-b),w=smooth(z/scale-c);
+  const layer=k=>THREE.MathUtils.lerp(
+    THREE.MathUtils.lerp(hash3(a,b,k),hash3(a+1,b,k),u),
+    THREE.MathUtils.lerp(hash3(a,b+1,k),hash3(a+1,b+1,k),u),v);
+  return THREE.MathUtils.lerp(layer(c),layer(c+1),w);
+}
+function isCave(x,y,z,h){
+  if(worldgenVersion<2||y<3||y>h-5)return false;
+  return noise3(x,y*1.3,z,17)>.67&&noise3(x+113,y*1.3-47,z-79,9)>.43;
+}
 const heightCache=new Map(),treeCache=new Map(),treeColumnCache=new Map();
 function height(x,z){
   const position=`${x},${z}`;
@@ -139,6 +156,7 @@ function generatedBlock(x,y,z){
   const h=height(x,z);
   if(y>h+9)return AIR;
   if(y<=h){
+    if(isCave(x,y,z,h))return AIR;
     if(y===h)return surface(x,z);
     if(y>h-4)return surface(x,z)==='sand'?'sand':'dirt';
     return 'stone';
@@ -326,7 +344,7 @@ function readWorldIndex(){
 }
 function saveData(){
   if(!active || !worldId)return;
-  const obj={version:2,id:worldId,worldName,seedString,seed,seed64,mode,edits:[...savedEdits],slots,position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,weather};
+  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,edits:[...savedEdits],slots,position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,weather};
   try {
     localStorage.setItem(WORLD_PREFIX+worldId,JSON.stringify(obj));
     const index=readWorldIndex().filter(item=>item.id!==worldId);
@@ -392,6 +410,7 @@ function validateImportedWorld(data){
   if(typeof data.worldName!=='string'||!data.worldName.trim()||data.worldName.length>100)return false;
   if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
   if(data.seed64!==undefined&&(typeof data.seed64!=='string'||!isSignedLong(data.seed64)))return false;
+  if(data.worldgenVersion!==undefined&&![1,2].includes(data.worldgenVersion))return false;
   if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
   if(!data.edits.every(entry=>Array.isArray(entry)&&entry.length===2&&/^[-]?\d+,[-]?\d+,[-]?\d+$/.test(entry[0])&&typeof entry[1]==='string'&&entry[1].length<=100))return false;
   const position=data.position;
@@ -435,8 +454,8 @@ function stringSeed(s){
   return BigInt(hash);
 }
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
-$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:2,seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
 function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();treeColumnCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();treeColumnCache.clear();return n}
 $('#resume').onclick=showWorlds;
 function registerBlock(id){
