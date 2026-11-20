@@ -42,7 +42,7 @@ const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,250);
 const sun=new THREE.DirectionalLight(0xfff1ca,2.6);sun.position.set(50,80,30);sun.castShadow=true;sun.shadow.mapSize.set(isTouchDevice ? 1024 : 2048,isTouchDevice ? 1024 : 2048);sun.shadow.camera.left=-85;sun.shadow.camera.right=85;sun.shadow.camera.top=85;sun.shadow.camera.bottom=-85;sun.shadow.camera.near=1;sun.shadow.camera.far=250;sun.shadow.bias=-.0007;scene.add(sun,sun.target);
 scene.add(new THREE.HemisphereLight(0xd0ecff,0x4b5039,2));
 const waterMaterial=new THREE.MeshPhysicalMaterial({color:0x3b8cbb,transparent:true,opacity:.72,roughness:.13,metalness:.14,clearcoat:1,clearcoatRoughness:.04,side:THREE.DoubleSide,depthWrite:false});
-const water=new THREE.Mesh(new THREE.PlaneGeometry(250,250,1,1),waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=SEA+.14;scene.add(water);
+const water=new THREE.Mesh(new THREE.BufferGeometry(),waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=SEA+.14;scene.add(water);
 // Render the reflected scene at reduced resolution on desktop GPUs.
 // Mobile uses the lightweight physical material to keep touch controls responsive.
 let reflectedWater=null;
@@ -57,7 +57,7 @@ if(!isTouchDevice){
       .replace('vec4( blendOverlay( base.rgb, color ), 1.0 )',
         'vec4( mix(base.rgb, color, 0.45), 0.76 )')
   };
-  reflectedWater=new Reflector(new THREE.PlaneGeometry(250,250),{
+  reflectedWater=new Reflector(new THREE.BufferGeometry(),{
     shader,textureWidth:512,textureHeight:512,multisample:0,clipBias:0.003,color:0x3b8cbb
   });
   reflectedWater.rotation.x=-Math.PI/2;
@@ -143,6 +143,7 @@ function generatedBlock(x,y,z){
     if(y>h-4)return surface(x,z)==='sand'?'sand':'dirt';
     return 'stone';
   }
+  if(y<=SEA)return 'water';
   for(const tree of treesForColumn(x,z)){
     if(tree.dx===0&&tree.dz===0&&y>tree.base&&y<=tree.top)return 'wood';
     const dy=y-tree.top;
@@ -270,6 +271,28 @@ function rebuild(cx,cz){
   }
   loaded.set(chunkKey,group);
   chunkGroup.add(group);
+  updateWaterSurface();
+}
+function updateWaterSurface(){
+  // A surface tile exists only where a water block touches the open air.
+  const positions=[],uvs=[];
+  for(const chunk of loaded.keys()){
+    const [cx,cz]=chunk.split(',').map(Number);
+    for(let x=cx*CHUNK;x<(cx+1)*CHUNK;x++)for(let z=cz*CHUNK;z<(cz+1)*CHUNK;z++){
+      if(getBlock(x,SEA,z)!=='water'||getBlock(x,SEA+1,z)!==AIR)continue;
+      // Water meshes lie in local XY and rotate into world XZ.
+      positions.push(x,-z,0,x+1,-z-1,0,x+1,-z,0,x,-z,0,x,-z-1,0,x+1,-z-1,0);
+      uvs.push(0,0,1,1,1,0,0,0,0,1,1,1);
+    }
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+  geometry.computeBoundingSphere();
+  const old=water.geometry;
+  water.geometry=geometry;
+  if(reflectedWater)reflectedWater.geometry=geometry;
+  old.dispose();
 }
 function updateChunks(){
   const cx=Math.floor(location.x/CHUNK),cz=Math.floor(location.z/CHUNK);
@@ -281,14 +304,14 @@ function updateChunks(){
   }
   pendingChunks.sort((a,b)=>
     (a[0]-cx)**2+(a[1]-cz)**2-(b[0]-cx)**2-(b[1]-cz)**2);
+  let removedChunks=false;
   for(const [k,g] of loaded){
     const [x,z]=k.split(',').map(Number);
     if(Math.abs(x-cx)>RADIUS||Math.abs(z-cz)>RADIUS){
-      chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose());loaded.delete(k);
+      chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose());loaded.delete(k);removedChunks=true;
     }
   }
-  water.position.x=cx*CHUNK;water.position.z=cz*CHUNK;
-  if(reflectedWater){reflectedWater.position.x=water.position.x;reflectedWater.position.z=water.position.z}
+  if(removedChunks)updateWaterSurface();
   sun.position.set(location.x+50,80,location.z+30);
   sun.target.position.set(location.x,0,location.z);
   sun.target.updateMatrixWorld();
