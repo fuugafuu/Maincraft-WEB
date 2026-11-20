@@ -30,22 +30,43 @@ function elementCorners(from, to, side) {
   }
 }
 
-function chooseVariant(state) {
+const defaultProperties = {
+  north:'false', south:'false', east:'false', west:'false', up:'false', down:'false',
+  facing:'south', axis:'y', half:'bottom', type:'bottom', shape:'straight',
+  open:'false', powered:'false', waterlogged:'false', snowy:'false',
+  in_wall:'false', hinge:'left', attached:'false', hanging:'false',
+  enabled:'true', lit:'false', persistent:'true', distance:'1',
+};
+
+function conditionMatches(condition, properties) {
+  if (condition.OR) return condition.OR.some(part => conditionMatches(part, properties));
+  if (condition.AND) return condition.AND.every(part => conditionMatches(part, properties));
+  return Object.entries(condition).every(([property, expected]) => {
+    const value=properties[property] ?? 'false';
+    return String(expected).split('|').includes(value);
+  });
+}
+
+function chooseVariants(state, id) {
+  const properties=id==='redstone_wire'
+    ? {...defaultProperties,north:'none',south:'none',east:'none',west:'none'}
+    : defaultProperties;
   if(state.variants) {
     const entries = Object.entries(state.variants);
-    const preferred = entries.find(([properties]) =>
-      !/=(true|upper|top|open|powered|waterlogged)/.test(properties)
-      && !/facing=(west|north|east)/.test(properties)
-      && !/axis=(x|z)/.test(properties));
+    const preferred = entries.find(([settings]) =>
+      !settings || settings.split(',').every(pair => {
+        const [name, value]=pair.split('=');
+        return (properties[name] ?? value) === value;
+      }));
     const variant = (preferred || entries[0])?.[1];
-    return Array.isArray(variant) ? variant[0] : variant;
+    return variant ? [Array.isArray(variant) ? variant[0] : variant] : [];
   }
   if(state.multipart) {
-    const part = state.multipart.find(p => !p.when);
-    const variant = part?.apply ?? state.multipart[0]?.apply;
-    return Array.isArray(variant) ? variant[0] : variant;
+    return state.multipart.filter(part => !part.when || conditionMatches(part.when, properties))
+      .map(part => Array.isArray(part.apply) ? part.apply[0] : part.apply)
+      .filter(Boolean);
   }
-  return null;
+  return [];
 }
 
 /**
@@ -146,11 +167,12 @@ export async function loadJavaResources(file, progress = () => {}) {
     const actual = aliases[id] || id;
     if (resolved.has(actual)) return resolved.get(actual);
     const state = readJson(prefix + 'blockstates/' + actual + '.json');
-    const variant = state && chooseVariant(state);
-    const model = variant && loadModel(variant.model);
-    if (!model?.elements?.length) return null;
+    const variants = state ? chooseVariants(state, actual) : [];
     const definitions = [];
-    for (const element of model.elements) {
+    for (const variant of variants) {
+      const model=loadModel(variant.model);
+      if(!model)continue;
+      for (const element of model.elements) {
       const faces = {};
       for (const [faceName, face] of Object.entries(element.faces || {})) {
         if (!sides[faceName]) continue;
@@ -161,14 +183,19 @@ export async function loadJavaResources(file, progress = () => {}) {
           tint: Number.isInteger(face.tintindex),
         };
       }
-      if (Object.keys(faces).length) definitions.push({from: element.from, to: element.to, faces, rotation:element.rotation});
+      if (Object.keys(faces).length) definitions.push({
+        from: element.from, to: element.to, faces, rotation:element.rotation,
+        x:variant.x||0, y:variant.y||0,
+      });
+      }
     }
+    if(!definitions.length)return null;
     const fullCube = definitions.length === 1
       && definitions[0].from.every(v => v === 0)
       && definitions[0].to.every(v => v === 16)
       && !definitions[0].rotation;
     const transparent = /glass|ice|water|leaves|slime|honey|pane|grate|bars/.test(actual);
-    const result = {elements:definitions, fullCube, transparent, x:variant.x||0, y:variant.y||0};
+    const result = {elements:definitions, fullCube, transparent};
     resolved.set(actual,result);
     return result;
   }
@@ -180,7 +207,7 @@ export async function loadJavaResources(file, progress = () => {}) {
     };
     for (const element of block.elements) {
       for (const [side, face] of Object.entries(element.faces)) {
-        if (block.fullCube && getNeighbor(...sides[side].normal) !== 'air') continue;
+        if ((block.fullCube || face.cull) && getNeighbor(...sides[side].normal) !== 'air') continue;
         const corners = elementCorners(element.from, element.to, side);
         if (!corners) continue;
         const [u0,v0,u1,v1] = face.uv;
@@ -195,8 +222,8 @@ export async function loadJavaResources(file, progress = () => {}) {
           if(element.rotation) rotate(v, new THREE.Vector3(
             ...(element.rotation.axis === 'x' ? [1,0,0] : element.rotation.axis === 'y' ? [0,1,0] : [0,0,1])
           ),element.rotation.angle,element.rotation.origin);
-          if(block.x) rotate(v,new THREE.Vector3(1,0,0),-block.x,[8,8,8]);
-          if(block.y) rotate(v,new THREE.Vector3(0,1,0),-block.y,[8,8,8]);
+          if(element.x) rotate(v,new THREE.Vector3(1,0,0),-element.x,[8,8,8]);
+          if(element.y) rotate(v,new THREE.Vector3(0,1,0),-element.y,[8,8,8]);
           return v;
         });
         const tint = face.tint
