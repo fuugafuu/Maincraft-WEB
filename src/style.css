@@ -49,6 +49,7 @@ html,body,#app,#game{overscroll-behavior:none}
 .craft-layout{display:flex;align-items:center;gap:14px;justify-content:center}
 .craft-grid{display:grid;grid-template-columns:repeat(2,minmax(64px,90px));gap:6px}
 .craft-grid.craft-grid-large{grid-template-columns:repeat(3,minmax(54px,78px))}
+@media(max-width:480px){.craft-layout{gap:7px}.craft-grid.craft-grid-large{grid-template-columns:repeat(3,54px)}.craft-grid-large .craft-cell{padding:3px;font-size:10px}#craft-result{min-width:76px}}
 .craft-cell,#craft-result{min-height:54px;padding:7px;background:#ffffff17;border:1px solid #ffffff55;border-radius:6px;color:white;font-size:11px}
 .craft-cell.filled{background:#63894c55}
 #craft-result{min-width:95px;max-width:135px}
