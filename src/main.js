@@ -135,6 +135,13 @@ function damagePlayer(amount){
   if(playerHealth===0)respawn();
   else scheduleSave();
 }
+function applyPlayerDamage(amount,ignoreCooldown=false){
+  if(!ignoreCooldown)return damagePlayer(amount);
+  const previousCooldown=playerDamageCooldown;
+  playerDamageCooldown=0;
+  damagePlayer(amount);
+  if(mode==='creative')playerDamageCooldown=previousCooldown;
+}
 const keys=new Set();const raycaster=new THREE.Raycaster();raycaster.far=7;
 const clamp=THREE.MathUtils.clamp;const key=(x,y,z)=>`${x},${y},${z}`;
 function hash(x,z,s=seed){let n=Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,1442695041);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295}
@@ -748,9 +755,9 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /summon pig|cow|sheep|zombie|creeper [x y z] /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
   case 'seed':chat(`シード: ${seed64}`);break;
-  case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;updateChunks();chat('テレポートしました');break}
+  case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;fallDistance=0;grounded=false;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
   case 'fill':{
     const a=xyz(),b=xyz(3),id=parts[6]?.replace('minecraft:',''),action=parts[7]||'replace';
@@ -786,6 +793,25 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     chat(`${changed.length} ブロックを複製しました`);break;
   }
   case 'give':{const id=parts.find(p=>byId[p.replace('minecraft:','')])?.replace('minecraft:','');if(!id){chat('使用法 /give block');break}slots[selected]=id;renderHotbar();void ensureJavaBlock(id);chat(`${id} を入手しました`);break}
+  case 'damage':{
+    const [target,rawAmount]=parts;
+    const amount=Number(rawAmount);
+    if(parts.length<2||parts.length>3||!['@s','@e'].includes(target)||!Number.isFinite(amount)||amount<0||amount>100000){
+      chat('使用法 /damage @s|@e amount [damage_type]');break;
+    }
+    if(target==='@s'){
+      if(mode==='creative'){chat('クリエイティブモードではダメージを受けません');break}
+      applyPlayerDamage(amount,true);
+      chat(`${amount} ダメージを与えました`);
+    }else{
+      const targets=[...mobs.entities];
+      let killed=0;
+      for(const entity of targets)if(mobs.damage(entity,amount))killed++;
+      scheduleSave();
+      chat(`${targets.length} 体に ${amount} ダメージを与えました（${killed} 体死亡）`);
+    }
+    break;
+  }
   case 'summon':{
     const type=parts[0]?.replace(/^minecraft:/,'');
     const p=parts.length===1?[location.x,location.y-PLAYER_EYE,location.z]:xyz(1);
