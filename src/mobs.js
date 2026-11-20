@@ -24,10 +24,12 @@ function cuboid(parent,color,size,position){
 }
 
 export class MobWorld {
-  constructor(scene){
+  constructor(scene,getBlock,isSolid){
     this.root=new THREE.Group();
     scene.add(this.root);
     this.entities=[];
+    this.getBlock=getBlock;
+    this.isSolid=isSolid;
   }
 
   static supports(type){return Object.hasOwn(types,type)}
@@ -70,7 +72,7 @@ export class MobWorld {
     }
     group.userData.entityId=id;
     this.root.add(group);
-    const entity={id,type,x,y,z,group,legs,phase:Math.random()*Math.PI*2,heading:Math.random()*Math.PI*2};
+    const entity={id,type,x,y,z,group,legs,phase:Math.random()*Math.PI*2,heading:Math.random()*Math.PI*2,decisionTime:0,walking:false};
     this.entities.push(entity);
     return entity;
   }
@@ -100,13 +102,58 @@ export class MobWorld {
     }
   }
 
+  groundAt(x,z,nearY){
+    const bx=Math.floor(x),bz=Math.floor(z);
+    for(let y=Math.min(100,Math.floor(nearY)+1);y>=Math.max(1,Math.floor(nearY)-3);y--){
+      if(this.isSolid(this.getBlock(bx,y-1,bz))&&
+         !this.isSolid(this.getBlock(bx,y,bz))&&
+         !this.isSolid(this.getBlock(bx,y+1,bz)))return y;
+    }
+    return null;
+  }
+
   update(dt,elapsed,player){
     for(const entity of this.entities){
       // Keep distant mobs stationary, reducing animation cost on phones.
       if(Math.hypot(entity.x-player.x,entity.z-player.z)>40)continue;
-      const step=Math.sin(elapsed*.55+entity.phase);
-      entity.group.rotation.y=entity.heading+step*.3;
-      const swing=Math.sin(elapsed*4+entity.phase)*.16;
+      const playerDistance=Math.hypot(entity.x-player.x,entity.z-player.z);
+      const chasing=entity.type==='zombie'&&playerDistance<12&&Math.abs(entity.y-player.y)<5;
+      entity.decisionTime-=dt;
+      if(chasing){
+        entity.heading=Math.atan2(player.x-entity.x,-(player.z-entity.z));
+        entity.walking=playerDistance>1.5;
+      }else if(entity.decisionTime<=0){
+        entity.decisionTime=1.5+Math.random()*3;
+        entity.heading+=Math.random()*2.4-1.2;
+        entity.walking=Math.random()>.3;
+      }
+      const speed=chasing?1.2:.65;
+      const step=speed*dt;
+      let moved=false;
+      if(entity.walking){
+        const x=entity.x+Math.sin(entity.heading)*step;
+        const z=entity.z-Math.cos(entity.heading)*step;
+        const ground=this.groundAt(x,z,entity.y);
+        if(ground!==null&&Math.abs(ground-entity.y)<=1.01){
+          entity.x=x;
+          entity.z=z;
+          entity.y=THREE.MathUtils.lerp(entity.y,ground,Math.min(1,dt*8));
+          moved=true;
+        }else if(!chasing){
+          entity.walking=false;
+          entity.decisionTime=0;
+          entity.heading+=Math.PI*.7;
+        }
+      }
+      const ground=this.groundAt(entity.x,entity.z,entity.y);
+      if(ground!==null&&Math.abs(ground-entity.y)<3){
+        entity.y=THREE.MathUtils.lerp(entity.y,ground,Math.min(1,dt*8));
+      }else if(entity.y>1){
+        entity.y=Math.max(1,entity.y-5*dt);
+      }
+      entity.group.position.set(entity.x,entity.y,entity.z);
+      entity.group.rotation.y=entity.heading;
+      const swing=moved?Math.sin(elapsed*7+entity.phase)*.35:0;
       entity.legs.forEach((leg,index)=>{leg.rotation.x=(index%2?1:-1)*swing});
     }
   }

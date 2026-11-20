@@ -76,7 +76,7 @@ if(!isTouchDevice){
 const skyClouds=new THREE.Group();scene.add(skyClouds);
 for(let i=0;i<36;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(10+Math.random()*13,.65,4+Math.random()*5),new THREE.MeshBasicMaterial({color:0xf9f9f0,transparent:true,opacity:.74,depthWrite:false}));c.position.set(Math.random()*270-135,52+Math.random()*8,Math.random()*270-135);skyClouds.add(c)}
 const chunkGroup=new THREE.Group();scene.add(chunkGroup);
-const mobs=new MobWorld(scene);
+const mobs=new MobWorld(scene,getBlock,isSolid);
 const rainCount=isTouchDevice?220:650;
 const rainGeometry=new THREE.BufferGeometry();
 const rainPositions=new Float32Array(rainCount*6);
