@@ -290,6 +290,11 @@ function rebuildEditedChunkHeights(){
   }
 }
 const PLAYER_RADIUS=.3, PLAYER_EYE=1.62, PLAYER_HEIGHT=1.8;
+function playerInWater(){
+  const feetY=location.y-PLAYER_EYE;
+  return getBlock(location.x,feetY+.25,location.z)==='water'||
+    getBlock(location.x,feetY+1,location.z)==='water';
+}
 function isSolid(id){
   return id!==AIR && id!=='water' && !/^(lava|.*_torch|.*_flower|.*_sapling|.*_grass|.*_fern|.*_mushroom|.*_carpet|.*_rail|.*_button|.*_pressure_plate|.*_sign|.*_banner|.*_vine|.*_seagrass|.*_coral_fan|.*_candle|redstone_wire|tripwire|lever|ladder|fire|soul_fire)$/.test(id);
 }
@@ -810,10 +815,19 @@ if(isTouchDevice){
 let last=performance.now(),frames=0,fps=0,second=0;
 function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?10:5.4;const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
     if(fly){location.x+=dx;location.z+=dz;location.y+=(Number(keys.has('Space'))-Number(keys.has('ControlLeft')))*speed*dt;vy=0}else{
-      moveHorizontal(dx,dz);
-      if(keys.has('Space')&&grounded){vy=8.2;grounded=false}
+      const swimming=playerInWater();
+      moveHorizontal(dx*(swimming?.55:1),dz*(swimming?.55:1));
+      if(swimming){
+        // Drag and buoyancy make water traversal distinct from falling through air.
+        vy=Math.max(-2.5,vy-5*dt);
+        if(keys.has('Space'))vy=Math.min(3.4,vy+18*dt);
+        if(keys.has('ControlLeft'))vy=Math.max(-3.4,vy-18*dt);
+        vy*=Math.pow(.82,dt*20);
+      }else{
+        if(keys.has('Space')&&grounded){vy=8.2;grounded=false}
+        vy-=22*dt;
+      }
       grounded=false;
-      vy-=22*dt;
       moveVertical(vy*dt);
       if(vy===0&&playerCollides(location.x,location.y-.025,location.z))grounded=true;
     }
