@@ -422,7 +422,15 @@ function moveVertical(dy){
     location.y+=step;
   }
 }
-function setBlock(x,y,z,id){if(y<1||y>100)return;const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else {savedEdits.set(k,id);if(id!==AIR)rememberEditHeight(x,y,z)}for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz)}scheduleSave()}
+function setBlock(x,y,z,id){
+  if(y<1||y>100)return;
+  writeBlock(x,y,z,id);
+  if(id!==AIR)rememberEditHeight(x,y,z);
+  for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){
+    if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz);
+  }
+  scheduleSave();
+}
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
 const faces=[{d:[1,0,0],v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]],shade:.8},{d:[-1,0,0],v:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]],shade:.8},{d:[0,1,0],v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]],shade:1.13},{d:[0,-1,0],v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]],shade:.54},{d:[0,0,1],v:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]],shade:.9},{d:[0,0,-1],v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]],shade:.73}];
 const materials={};for(const b of BLOCKS)materials[b.id]=new THREE.MeshLambertMaterial({vertexColors:true,side:b.transparent?THREE.DoubleSide:THREE.FrontSide,transparent:!!b.transparent,opacity:b.transparent?.72:1,depthWrite:!b.transparent});
@@ -1086,6 +1094,7 @@ function updateBlockRegion(positions){
 }
 function writeBlock(x,y,z,id){
   const position=key(x,y,z);
+  if(getBlock(x,y,z)==='chest'&&id!=='chest')chestContents.delete(position);
   if(id===generatedBlock(x,y,z))savedEdits.delete(position);
   else savedEdits.set(position,id);
 }
@@ -1119,10 +1128,23 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     if(dest[1]+size[1]-1>100){chat('複製先がワールドの高さを超えています');break}
     const source=[];
     for(let dx=0;dx<size[0];dx++)for(let dz=0;dz<size[2];dz++)for(let dy=0;dy<size[1];dy++){
-      source.push([dest[0]+dx,dest[1]+dy,dest[2]+dz,getBlock(ranges[0][0]+dx,ranges[1][0]+dy,ranges[2][0]+dz)]);
+      const sourceX=ranges[0][0]+dx,sourceY=ranges[1][0]+dy,sourceZ=ranges[2][0]+dz;
+      const id=getBlock(sourceX,sourceY,sourceZ);
+      const chest=id==='chest'?chestContents.get(key(sourceX,sourceY,sourceZ)):null;
+      source.push([dest[0]+dx,dest[1]+dy,dest[2]+dz,id,chest?{items:[...chest.items],counts:[...chest.counts]}:null]);
     }
     const changed=[],usedBlocks=new Set();
-    for(const [x,y,z,id] of source){if(getBlock(x,y,z)===id)continue;writeBlock(x,y,z,id);changed.push([x,y,z]);if(id!==AIR)usedBlocks.add(id)}
+    for(const [x,y,z,id,chest] of source){
+      const destinationKey=key(x,y,z);
+      if(getBlock(x,y,z)===id&&id!=='chest')continue;
+      writeBlock(x,y,z,id);
+      if(id==='chest'){
+        if(chest)chestContents.set(destinationKey,chest);
+        else chestContents.delete(destinationKey);
+      }
+      changed.push([x,y,z]);
+      if(id!==AIR)usedBlocks.add(id);
+    }
     updateBlockRegion(changed);
     for(const id of usedBlocks)void ensureJavaBlock(id);
     chat(`${changed.length} ブロックを複製しました`);break;
