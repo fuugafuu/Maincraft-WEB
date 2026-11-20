@@ -113,7 +113,7 @@ function updateRain(dt){
   rainGeometry.attributes.position.needsUpdate=true;
 }
 let seed=1,seed64='1',seedString='',worldgenVersion=1,worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,doDaylightCycle=true,spawnPosition=null;
-let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
+let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),storageSlots=Array(27).fill(AIR),storageCounts=Array(27).fill(0),inventorySelection=null,selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 let playerHealth=20,playerDamageCooldown=0,fallDistance=0;
 let foodLevel=20,foodSaturation=5,foodExhaustion=0,foodTimer=0;
 const healthHud=document.createElement('div');
@@ -541,7 +541,7 @@ function readWorldIndex(){
 }
 function saveData(){
   if(!active || !worldId)return;
-  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,playerHealth,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],slots,slotCounts,position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
+  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,playerHealth,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],slots,slotCounts,storageSlots,storageCounts,position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
   try {
     localStorage.setItem(WORLD_PREFIX+worldId,JSON.stringify(obj));
     const index=readWorldIndex().filter(item=>item.id!==worldId);
@@ -612,6 +612,8 @@ function validateImportedWorld(data){
   if(data.foodSaturation!==undefined&&(!Number.isFinite(data.foodSaturation)||data.foodSaturation<0||data.foodSaturation>20))return false;
   if(data.foodExhaustion!==undefined&&(!Number.isFinite(data.foodExhaustion)||data.foodExhaustion<0||data.foodExhaustion>100))return false;
   if(data.slotCounts!==undefined&&(!Array.isArray(data.slotCounts)||data.slotCounts.length!==9||!data.slotCounts.every(count=>Number.isInteger(count)&&count>=0&&count<=64)))return false;
+  if(data.storageSlots!==undefined&&(!Array.isArray(data.storageSlots)||data.storageSlots.length!==27||!data.storageSlots.every(id=>typeof id==='string'&&id.length<=100)))return false;
+  if(data.storageCounts!==undefined&&(!Array.isArray(data.storageCounts)||data.storageCounts.length!==27||!data.storageCounts.every(count=>Number.isInteger(count)&&count>=0&&count<=64)))return false;
   if(data.worldgenVersion!==undefined&&![1,2,3,4,5].includes(data.worldgenVersion))return false;
   if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
   if(data.entities!==undefined&&(!Array.isArray(data.entities)||data.entities.length>128||!data.entities.every(entity=>entity&&typeof entity==='object'&&MobWorld.supports(entity.type)&&['x','y','z'].every(axis=>Number.isFinite(entity[axis])))))return false;
@@ -662,7 +664,7 @@ function lockPointer(){
   const request=renderer.domElement.requestPointerLock?.();
   request?.catch?.(()=>{});
 }
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));const survival=$('#mode').value==='survival';newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:5,seed,mode:$('#mode').value,edits:[],slots:survival?Array(9).fill(AIR):['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts:Array(9).fill(survival?0:64)})};
 $('#resume').onclick=showWorlds;
 function registerBlock(id){
@@ -725,18 +727,59 @@ function collectBlock(id){
   if(id==='air'||id==='bedrock'||id==='water')return;
   const drop=({grass:'dirt',stone:'cobble',leaves:'air'}[id]??id);
   if(drop==='air')return;
-  const stack=slots.findIndex((slot,index)=>slot===drop&&slotCounts[index]>0&&slotCounts[index]<64);
-  const empty=slots.findIndex((slot,index)=>slot==='air'||slotCounts[index]===0);
-  const index=stack>=0?stack:empty;
-  if(index<0){notice('インベントリがいっぱいです');return}
-  if(index===empty&&stack<0)slotCounts[index]=0;
-  slots[index]=drop;
-  slotCounts[index]++;
+  const containers=[[slots,slotCounts],[storageSlots,storageCounts]];
+  let target;
+  for(const [items,counts] of containers){
+    const index=items.findIndex((item,i)=>item===drop&&counts[i]>0&&counts[i]<64);
+    if(index>=0){target=[items,counts,index];break}
+  }
+  if(!target)for(const [items,counts] of containers){
+    const index=items.findIndex((item,i)=>item===AIR||counts[i]===0);
+    if(index>=0){target=[items,counts,index];break}
+  }
+  if(!target){notice('インベントリがいっぱいです');return}
+  const [items,counts,index]=target;
+  if(items[index]===AIR||counts[index]===0)counts[index]=0;
+  items[index]=drop;
+  counts[index]++;
   renderHotbar();
 }
 function $$(s){return [...document.querySelectorAll(s)]}
 function notice(msg){const el=$('#notice');el.textContent=msg;el.classList.add('show');clearTimeout(notice.timeout);notice.timeout=setTimeout(()=>el.classList.remove('show'),2400)}
 function renderInventory(query=''){
+  if(mode==='survival'){
+    const cells=[...storageSlots,...slots];
+    const counts=[...storageCounts,...slotCounts];
+    $('#itemcount').textContent='上段27枠は持ち物 · 下段9枠はホットバー · 2枠を順に選択して移動';
+    $('#items').innerHTML=cells.map((id,i)=>{
+      const item=byId[id]??foodById[id];
+      return `<button class="item-tile inventory-cell ${inventorySelection===i?'inventory-picked':''}" data-index="${i}" aria-label="${i<27?'持ち物':'ホットバー'} ${i<27?i+1:i-26} ${item?.name??'空'} ${counts[i]||0}個"><i style="background:${item?`#${item.color.toString(16).padStart(6,'0')}`:'transparent'}"></i><span>${item?.name??'空'}</span>${id!==AIR&&counts[i]>0?`<small>${counts[i]}</small>`:''}</button>`;
+    }).join('');
+    $$('.inventory-cell').forEach(cell=>cell.onclick=()=>{
+      const index=Number(cell.dataset.index);
+      if(inventorySelection===null){
+        if(cells[index]===AIR||counts[index]===0)return;
+        inventorySelection=index;
+      }else{
+        const first=inventorySelection;
+        inventorySelection=null;
+        if(first!==index){
+          const origin=first<27?storageSlots:slots;
+          const originCounts=first<27?storageCounts:slotCounts;
+          const destination=index<27?storageSlots:slots;
+          const destinationCounts=index<27?storageCounts:slotCounts;
+          const a=first<27?first:first-27;
+          const b=index<27?index:index-27;
+          [origin[a],destination[b]]=[destination[b],origin[a]];
+          [originCounts[a],destinationCounts[b]]=[destinationCounts[b],originCounts[a]];
+          renderHotbar();
+          scheduleSave();
+        }
+      }
+      renderInventory();
+    });
+    return;
+  }
   const matches=[...BLOCKS.filter(b=>b.id!=='bedrock'),...FOODS].filter(b=>b.id.includes(query.toLowerCase())||b.name.includes(query));
   $('#itemcount').textContent=`${matches.length} items · displaying ${Math.min(matches.length,120)}`;
   $('#items').innerHTML=matches.slice(0,120).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="background:#${b.color.toString(16).padStart(6,'0')}"></i>${b.name}</button>`).join('');
@@ -752,8 +795,12 @@ function renderInventory(query=''){
 }
 function openInventory(){
   inventoryOpen=true;
+  inventorySelection=null;
   document.exitPointerLock?.();
   $('#inventory').classList.remove('hidden');
+  $('#inventory h2').textContent=mode==='survival'?'インベントリ':'ブロックとアイテム';
+  $('#inventory p').textContent=mode==='survival'?'持ち物とホットバーのアイテムを入れ替えます。':'選択するとホットバーの現在のスロットにセットします。';
+  $('#itemsearch').classList.toggle('hidden',mode==='survival');
   $('#itemsearch').value='';
   renderInventory();
   if(!isTouchDevice)$('#itemsearch').focus();
