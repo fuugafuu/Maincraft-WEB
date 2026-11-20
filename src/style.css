@@ -39,6 +39,9 @@ html,body,#app,#game{overscroll-behavior:none}
 
 .slot{pointer-events:auto;touch-action:manipulation}
 .assetstatus{font-size:11px;line-height:1.5;color:#c5d7cb;text-align:left;padding:7px 0;overflow-wrap:anywhere}
+.worldlist{max-height:180px;overflow-y:auto;margin-top:10px;display:grid;gap:6px;text-align:left}
+.world-entry{width:100%;color:#e6f0e5;background:#ffffff12;border:1px solid #ffffff35;border-radius:8px;padding:11px 13px;text-align:left;font-size:13px;overflow-wrap:anywhere}
+.world-entry:hover,.world-entry:focus-visible{background:#ffffff30}
 .itemcount{font-size:12px;color:#b5ccbc;padding:8px 0}
 #itemsearch{margin:8px 0}
 #menu{overflow-y:auto;padding:12px 0}
