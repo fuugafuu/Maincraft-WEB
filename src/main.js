@@ -39,7 +39,7 @@ const water=new THREE.Mesh(new THREE.PlaneGeometry(250,250,1,1),waterMaterial);w
 const skyClouds=new THREE.Group();scene.add(skyClouds);
 for(let i=0;i<36;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(10+Math.random()*13,.65,4+Math.random()*5),new THREE.MeshBasicMaterial({color:0xf9f9f0,transparent:true,opacity:.74,depthWrite:false}));c.position.set(Math.random()*270-135,52+Math.random()*8,Math.random()*270-135);skyClouds.add(c)}
 const chunkGroup=new THREE.Group();scene.add(chunkGroup);
-let seed=1,seedString='',worldName='',mode='creative',savedEdits=new Map(),loaded=new Map(),active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000;
+let seed=1,seedString='',worldName='',mode='creative',savedEdits=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000;
 let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 const keys=new Set();const raycaster=new THREE.Raycaster();raycaster.far=7;
 const clamp=THREE.MathUtils.clamp;const key=(x,y,z)=>`${x},${y},${z}`;
@@ -139,11 +139,35 @@ function rebuild(cx,cz){
   loaded.set(chunkKey,group);
   chunkGroup.add(group);
 }
-function updateChunks(){const cx=Math.floor(location.x/CHUNK),cz=Math.floor(location.z/CHUNK);if(cx===lastChunkX&&cz===lastChunkZ)return;lastChunkX=cx;lastChunkZ=cz;for(let a=cx-RADIUS;a<=cx+RADIUS;a++)for(let b=cz-RADIUS;b<=cz+RADIUS;b++)if(!loaded.has(`${a},${b}`))rebuild(a,b);for(const [k,g] of loaded)if(Math.abs(Number(k.split(',')[0])-cx)>RADIUS||Math.abs(Number(k.split(',')[1])-cz)>RADIUS){chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose());loaded.delete(k)}water.position.x=cx*CHUNK;water.position.z=cz*CHUNK;sun.position.set(location.x+50,80,location.z+30);sun.target.position.set(location.x,0,location.z);sun.target.updateMatrixWorld()}
+function updateChunks(){
+  const cx=Math.floor(location.x/CHUNK),cz=Math.floor(location.z/CHUNK);
+  if(cx===lastChunkX&&cz===lastChunkZ)return;
+  lastChunkX=cx;lastChunkZ=cz;
+  pendingChunks=[];
+  for(let a=cx-RADIUS;a<=cx+RADIUS;a++)for(let b=cz-RADIUS;b<=cz+RADIUS;b++){
+    if(!loaded.has(`${a},${b}`))pendingChunks.push([a,b]);
+  }
+  pendingChunks.sort((a,b)=>
+    (a[0]-cx)**2+(a[1]-cz)**2-(b[0]-cx)**2-(b[1]-cz)**2);
+  for(const [k,g] of loaded){
+    const [x,z]=k.split(',').map(Number);
+    if(Math.abs(x-cx)>RADIUS||Math.abs(z-cz)>RADIUS){
+      chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose());loaded.delete(k);
+    }
+  }
+  water.position.x=cx*CHUNK;water.position.z=cz*CHUNK;
+  sun.position.set(location.x+50,80,location.z+30);
+  sun.target.position.set(location.x,0,location.z);
+  sun.target.updateMatrixWorld();
+}
+function loadNextChunk(){
+  const next=pendingChunks.shift();
+  if(next&&!loaded.has(`${next[0]},${next[1]}`))rebuild(...next);
+}
 function saveData(){if(!active)return;const obj={version:1,worldName,seedString,seed,mode,edits:[...savedEdits],slots,position:location,timeOfDay};try{localStorage.setItem('maincraft.world',JSON.stringify(obj))}catch{notice('保存容量の上限に達しました')}}let saveTimer;function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveData,900)}
 function stringSeed(s){if(!s)return Math.floor(Math.random()*2147483647);if(/^-?\d+$/.test(s))return Number(BigInt.asIntN(32,BigInt(s)));let h=0;for(const ch of s)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;return h}
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
+function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const seed=stringSeed(seedString);newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(seed),seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
 function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();return n}
 $('#resume').onclick=()=>{try{const data=JSON.parse(localStorage.getItem('maincraft.world'));if(!data)throw Error();newWorld(data)}catch{notice('保存されたワールドがありません');alert('保存されたワールドがありません')}};
@@ -307,7 +331,7 @@ if(isTouchDevice){
   }
 }
 let last=performance.now(),frames=0,fps=0,second=0;
-function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?10:5.4;location.x+=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;location.z+=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?10:5.4;location.x+=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;location.z+=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
     if(fly){location.y+=(Number(keys.has('Space'))-Number(keys.has('ControlLeft')))*speed*dt;vy=0}else{if(keys.has('Space')&&grounded){vy=8.2;grounded=false}vy-=22*dt;location.y+=vy*dt;const footX=Math.floor(location.x),footZ=Math.floor(location.z);let solid=-1;for(let y=Math.min(90,Math.floor(location.y));y>=0;y--){const b=getBlock(footX,y,footZ);if(b!==AIR&&b!=='water'){solid=y+1;break}}if(location.y<solid+1.65){location.y=solid+1.65;vy=0;grounded=true}else grounded=false}
     location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();skyClouds.position.x+=dt*.35;water.material.opacity=.70+Math.sin(now*.0018)*.04;second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed}`}}renderer.render(scene,camera)}
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});requestAnimationFrame(animate);
