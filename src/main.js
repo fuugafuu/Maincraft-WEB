@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import './style.css';
 
+const isTouchDevice = matchMedia('(pointer: coarse)').matches;
 const BLOCKS = [
   {id:'grass',name:'草ブロック',color:0x699b46,top:0x83b85a,side:0x806343},
   {id:'dirt',name:'土',color:0x806043},
@@ -20,16 +21,16 @@ const BLOCKS = [
   {id:'bedrock',name:'岩盤',color:0x393b3b},
 ];
 const byId = Object.fromEntries(BLOCKS.map(b=>[b.id,b]));
-const AIR = 'air', SEA = 9, CHUNK = 16, RADIUS = 2;
+const AIR = 'air', SEA = 9, CHUNK = 16, RADIUS = isTouchDevice ? 1 : 2;
 const app = document.getElementById('app');
-app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobgroup"><span></span><button data-key="KeyW">▲</button><span></span><button data-key="KeyA">◀</button><button data-key="KeyS">▼</button><button data-key="KeyD">▶</button></div><div class="mobactions"><button data-action="break">⛏</button><button data-action="place">▣</button><button data-key="Space">↑</button><button data-action="inventory">E</button></div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
+app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobtop"><button data-action="pause" aria-label="メニュー">☰</button><button data-action="chat" aria-label="チャットとコマンド">⌨</button><button data-action="fly" aria-label="飛行切り替え">飛行</button></div><div class="mobgroup"><span></span><button data-key="KeyW" aria-label="前進">▲</button><span></span><button data-key="KeyA" aria-label="左移動">◀</button><button data-key="KeyS" aria-label="後退">▼</button><button data-key="KeyD" aria-label="右移動">▶</button></div><div class="mobactions"><button data-key="ControlLeft" aria-label="下降">↓</button><button data-key="Space" aria-label="ジャンプ・上昇">↑</button><button data-action="break" aria-label="破壊">⛏</button><button data-action="place" aria-label="設置">▣</button><button data-action="inventory" aria-label="インベントリ">▦</button></div><div class="mobhint">画面をスワイプして視点移動</div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
 const $=s=>document.querySelector(s);
 const game=$('#game'), canvas=document.createElement('canvas');
 const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
-renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.24;game.appendChild(renderer.domElement);
+renderer.setPixelRatio(Math.min(devicePixelRatio,isTouchDevice ? 1.5 : 2)); renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.24;game.appendChild(renderer.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x8bc3e4);scene.fog=new THREE.Fog(0x8bc3e4,45,130);
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,250);
-const sun=new THREE.DirectionalLight(0xfff1ca,2.6);sun.position.set(50,80,30);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-85;sun.shadow.camera.right=85;sun.shadow.camera.top=85;sun.shadow.camera.bottom=-85;sun.shadow.camera.near=1;sun.shadow.camera.far=250;sun.shadow.bias=-.0007;scene.add(sun,sun.target);
+const sun=new THREE.DirectionalLight(0xfff1ca,2.6);sun.position.set(50,80,30);sun.castShadow=true;sun.shadow.mapSize.set(isTouchDevice ? 1024 : 2048,isTouchDevice ? 1024 : 2048);sun.shadow.camera.left=-85;sun.shadow.camera.right=85;sun.shadow.camera.top=85;sun.shadow.camera.bottom=-85;sun.shadow.camera.near=1;sun.shadow.camera.far=250;sun.shadow.bias=-.0007;scene.add(sun,sun.target);
 scene.add(new THREE.HemisphereLight(0xd0ecff,0x4b5039,2));
 const waterMaterial=new THREE.MeshPhysicalMaterial({color:0x3b8cbb,transparent:true,opacity:.72,roughness:.13,metalness:.14,clearcoat:1,clearcoatRoughness:.04,side:THREE.DoubleSide,depthWrite:false});
 const water=new THREE.Mesh(new THREE.PlaneGeometry(250,250,1,1),waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=SEA+.14;scene.add(water);
@@ -57,7 +58,8 @@ function rebuild(cx,cz){const chunkKey=`${cx},${cz}`;const prior=loaded.get(chun
 function updateChunks(){const cx=Math.floor(location.x/CHUNK),cz=Math.floor(location.z/CHUNK);if(cx===lastChunkX&&cz===lastChunkZ)return;lastChunkX=cx;lastChunkZ=cz;for(let a=cx-RADIUS;a<=cx+RADIUS;a++)for(let b=cz-RADIUS;b<=cz+RADIUS;b++)if(!loaded.has(`${a},${b}`))rebuild(a,b);for(const [k,g] of loaded)if(Math.abs(Number(k.split(',')[0])-cx)>RADIUS||Math.abs(Number(k.split(',')[1])-cz)>RADIUS){chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose());loaded.delete(k)}water.position.x=cx*CHUNK;water.position.z=cz*CHUNK;sun.position.set(location.x+50,80,location.z+30);sun.target.position.set(location.x,0,location.z);sun.target.updateMatrixWorld()}
 function saveData(){if(!active)return;const obj={version:1,worldName,seedString,seed,mode,edits:[...savedEdits],slots,position:location,timeOfDay};try{localStorage.setItem('maincraft.world',JSON.stringify(obj))}catch{notice('保存容量の上限に達しました')}}let saveTimer;function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveData,900)}
 function stringSeed(s){if(!s)return Math.floor(Math.random()*2147483647);if(/^-?\d+$/.test(s))return Number(BigInt.asIntN(32,BigInt(s)));let h=0;for(const ch of s)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;return h}
-function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();renderer.domElement.requestPointerLock?.()}
+function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
+function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const seed=stringSeed(seedString);newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(seed),seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
 function heightFor(s,x,z){const old=seed;seed=s;const n=height(x,z);seed=old;return n}
 $('#resume').onclick=()=>{try{const data=JSON.parse(localStorage.getItem('maincraft.world'));if(!data)throw Error();newWorld(data)}catch{notice('保存されたワールドがありません');alert('保存されたワールドがありません')}};
@@ -65,21 +67,21 @@ function renderHotbar(){$('#hotbar').innerHTML=slots.map((id,i)=>`<div class="sl
 function $$(s){return [...document.querySelectorAll(s)]}
 function notice(msg){const el=$('#notice');el.textContent=msg;el.classList.add('show');clearTimeout(notice.timeout);notice.timeout=setTimeout(()=>el.classList.remove('show'),2400)}
 function openInventory(){inventoryOpen=true;document.exitPointerLock?.();$('#inventory').classList.remove('hidden');$('#items').innerHTML=BLOCKS.filter(b=>b.id!=='bedrock').map(b=>`<button class="item-tile" data-id="${b.id}"><i style="background:#${b.color.toString(16).padStart(6,'0')}"></i>${b.name}</button>`).join('');$$('.item-tile').forEach(el=>el.onclick=()=>{slots[selected]=el.dataset.id;renderHotbar();closeInventory();scheduleSave()})}
-function closeInventory(){inventoryOpen=false;$('#inventory').classList.add('hidden');if(active&&!paused)renderer.domElement.requestPointerLock?.()}
+function closeInventory(){inventoryOpen=false;$('#inventory').classList.add('hidden');if(active&&!paused)lockPointer()}
 $('#closeinv').onclick=closeInventory;
 function pause(){if(!active)return;paused=true;document.exitPointerLock?.();$('#pause').classList.remove('hidden')}
-function unpause(){paused=false;$('#pause').classList.add('hidden');renderer.domElement.requestPointerLock?.()}
+function unpause(){paused=false;$('#pause').classList.add('hidden');lockPointer()}
 $('#continue').onclick=unpause;$('#save').onclick=()=>{saveData();notice('保存しました');unpause()};$('#back').onclick=()=>{saveData();active=false;paused=false;$('#pause').classList.add('hidden');$('#hud').classList.add('hidden');$('#menu').classList.remove('hidden')};
-document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement&&active&&!inventoryOpen&&!chatOpen&&!paused)pause()});
+document.addEventListener('pointerlockchange',()=>{if(!isTouchDevice&&!document.pointerLockElement&&active&&!inventoryOpen&&!chatOpen&&!paused)pause()});
 document.addEventListener('mousemove',e=>{if(document.pointerLockElement!==renderer.domElement||paused)return;yaw-=e.movementX*.0024;pitch=clamp(pitch-e.movementY*.0024,-Math.PI/2+.01,Math.PI/2-.01)});
 document.addEventListener('keydown',e=>{if(!active)return;if(chatOpen){if(e.code==='Enter'){execute($('#command').value);$('#command').value='';closeChat()}else if(e.code==='Escape')closeChat();return}if(inventoryOpen){if(e.code==='Escape'||e.code==='KeyE')closeInventory();return}if(e.code==='Escape'){pause();return}if(paused)return;if(e.code==='KeyT'||e.code==='Slash'){openChat(e.code==='Slash'?'/':'');e.preventDefault();return}if(e.code==='KeyE'){openInventory();return}if(e.code==='KeyF'){fly=!fly;vy=0;notice(fly?'飛行モード ON':'飛行モード OFF');return}if(/^Digit[1-9]$/.test(e.code)){selected=Number(e.code.slice(-1))-1;renderHotbar()}keys.add(e.code);if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault()});
 document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>keys.clear());
-renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('mousedown',e=>{if(!active||paused||inventoryOpen||chatOpen)return;if(document.pointerLockElement!==renderer.domElement){renderer.domElement.requestPointerLock?.();return}if(e.button===0)interact(false);if(e.button===2)interact(true)});
+renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('mousedown',e=>{if(!active||paused||inventoryOpen||chatOpen||isTouchDevice)return;if(document.pointerLockElement!==renderer.domElement){lockPointer();return}if(e.button===0)interact(false);if(e.button===2)interact(true)});
 document.addEventListener('wheel',e=>{if(!active||paused||inventoryOpen)return;selected=(selected+(e.deltaY>0?1:8))%9;renderHotbar()},{passive:true});
 function pick(){camera.updateMatrixWorld();raycaster.setFromCamera(new THREE.Vector2(),camera);const targets=[...loaded.values()].flatMap(g=>g.children);const hits=raycaster.intersectObjects(targets,false);return hits.find(h=>h.distance<=6.5)}
 function interact(place){const hit=pick();if(!hit)return;const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld).round();const p=hit.point.clone().addScaledVector(normal,place?.025:-.025);if(place)p.copy(hit.point).addScaledVector(normal,.025);const x=Math.floor(p.x),y=Math.floor(p.y),z=Math.floor(p.z);if(place){if(Math.abs(x-location.x)<.8&&Math.abs(z-location.z)<.8&&y<location.y+.6&&y+1>location.y-1.6)return;setBlock(x,y,z,slots[selected])}else if(getBlock(x,y,z)!=='bedrock')setBlock(x,y,z,AIR)}
 function openChat(prefill=''){chatOpen=true;document.exitPointerLock?.();$('#chat').classList.remove('hidden');$('#command').value=prefill;$('#command').focus()}
-function closeChat(){chatOpen=false;$('#chat').classList.add('hidden');renderer.domElement.requestPointerLock?.()}
+function closeChat(){chatOpen=false;$('#chat').classList.add('hidden');lockPointer()}
 function chat(text){const log=$('#chatlog');const line=document.createElement('div');line.textContent=text;log.appendChild(line);log.scrollTop=log.scrollHeight;while(log.children.length>16)log.firstChild.remove()}
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite);
   switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block /fill x1 y1 z1 x2 y2 z2 block /give block /time set day|night|noon|midnight /gamemode creative|survival /weather clear|rain /save /spawnpoint /locate');break;
@@ -96,7 +98,54 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
   case 'locate':chat('構造物の探索は今後実装予定です');break;
   default:chat(`不明なコマンド: /${cmd}。/help を参照してください`)} }
 function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.cos(a);sun.position.set(location.x+Math.sin(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
-const mobileMatch=matchMedia('(pointer:coarse)');if(mobileMatch.matches){let touch=null;renderer.domElement.addEventListener('touchstart',e=>{if(!active||paused)return;touch={x:e.touches[0].clientX,y:e.touches[0].clientY}},{passive:true});renderer.domElement.addEventListener('touchmove',e=>{if(!touch)return;const t=e.touches[0];yaw-=(t.clientX-touch.x)*.005;pitch=clamp(pitch-(t.clientY-touch.y)*.005,-1.5,1.5);touch={x:t.clientX,y:t.clientY}},{passive:true});renderer.domElement.addEventListener('touchend',()=>touch=null);$$('#mobile button').forEach(btn=>{const code=btn.dataset.key;btn.addEventListener('pointerdown',e=>{e.preventDefault();if(code)keys.add(code);else if(btn.dataset.action==='break')interact(false);else if(btn.dataset.action==='place')interact(true);else openInventory()});btn.addEventListener('pointerup',()=>keys.delete(code));btn.addEventListener('pointercancel',()=>keys.delete(code))})}
+if(isTouchDevice){
+  let lookPointer=null;
+  let previousX=0,previousY=0;
+  const view=renderer.domElement;
+  view.addEventListener('pointerdown',event=>{
+    if(!active||paused||inventoryOpen||chatOpen||lookPointer!==null)return;
+    lookPointer=event.pointerId;
+    previousX=event.clientX;previousY=event.clientY;
+    view.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  view.addEventListener('pointermove',event=>{
+    if(lookPointer!==event.pointerId||!active||paused||inventoryOpen||chatOpen)return;
+    yaw-=(event.clientX-previousX)*.005;
+    pitch=clamp(pitch-(event.clientY-previousY)*.005,-1.5,1.5);
+    previousX=event.clientX;previousY=event.clientY;
+    event.preventDefault();
+  });
+  const releaseView=event=>{if(lookPointer===event.pointerId)lookPointer=null};
+  view.addEventListener('pointerup',releaseView);
+  view.addEventListener('pointercancel',releaseView);
+  view.addEventListener('lostpointercapture',releaseView);
+  const held=new Map();
+  function releaseButton(event){
+    const code=held.get(event.pointerId);
+    if(code){keys.delete(code);held.delete(event.pointerId)}
+  }
+  for(const btn of $$('#mobile button')){
+    btn.addEventListener('pointerdown',event=>{
+      if(!active||paused||inventoryOpen||chatOpen)return;
+      event.preventDefault();
+      btn.setPointerCapture(event.pointerId);
+      const code=btn.dataset.key;
+      if(code){keys.add(code);held.set(event.pointerId,code);return}
+      switch(btn.dataset.action){
+        case 'break':interact(false);break;
+        case 'place':interact(true);break;
+        case 'inventory':openInventory();break;
+        case 'chat':openChat('/');break;
+        case 'pause':pause();break;
+        case 'fly':fly=!fly;vy=0;notice(fly?'飛行モード ON':'飛行モード OFF');break;
+      }
+    });
+    btn.addEventListener('pointerup',releaseButton);
+    btn.addEventListener('pointercancel',releaseButton);
+    btn.addEventListener('lostpointercapture',releaseButton);
+  }
+}
 let last=performance.now(),frames=0,fps=0,second=0;
 function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const speed=(keys.has('ShiftLeft')||keys.has('ShiftRight'))?10:5.4;location.x+=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;location.z+=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
     if(fly){location.y+=(Number(keys.has('Space'))-Number(keys.has('ControlLeft')))*speed*dt;vy=0}else{if(keys.has('Space')&&grounded){vy=8.2;grounded=false}vy-=22*dt;location.y+=vy*dt;const footX=Math.floor(location.x),footZ=Math.floor(location.z);let solid=-1;for(let y=Math.min(90,Math.floor(location.y));y>=0;y--){const b=getBlock(footX,y,footZ);if(b!==AIR&&b!=='water'){solid=y+1;break}}if(location.y<solid+1.65){location.y=solid+1.65;vy=0;grounded=true}else grounded=false}
