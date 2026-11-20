@@ -668,8 +668,30 @@ document.addEventListener('keydown',e=>{if(!active)return;if(chatOpen){if(e.code
 document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>keys.clear());
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('mousedown',e=>{if(!active||paused||inventoryOpen||chatOpen||isTouchDevice)return;if(document.pointerLockElement!==renderer.domElement){lockPointer();return}if(e.button===0)interact(false);if(e.button===2)interact(true)});
 document.addEventListener('wheel',e=>{if(!active||paused||inventoryOpen)return;selected=(selected+(e.deltaY>0?1:8))%9;renderHotbar()},{passive:true});
-function pick(){camera.updateMatrixWorld();raycaster.setFromCamera(new THREE.Vector2(),camera);const targets=[...loaded.values()].flatMap(g=>g.children);const hits=raycaster.intersectObjects(targets,false);return hits.find(h=>h.distance<=6.5)}
-function interact(place){const hit=pick();if(!hit)return;const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld).round();const p=hit.point.clone().addScaledVector(normal,place?.025:-.025);if(place)p.copy(hit.point).addScaledVector(normal,.025);const x=Math.floor(p.x),y=Math.floor(p.y),z=Math.floor(p.z);if(place){if(Math.abs(x-location.x)<.8&&Math.abs(z-location.z)<.8&&y<location.y+.6&&y+1>location.y-1.6)return;setBlock(x,y,z,slots[selected])}else if(getBlock(x,y,z)!=='bedrock')setBlock(x,y,z,AIR)}
+function pick(){
+  camera.updateMatrixWorld();
+  raycaster.setFromCamera(new THREE.Vector2(),camera);
+  const blocks=[...loaded.values()].flatMap(group=>group.children);
+  const targets=[...blocks,mobs.root];
+  return raycaster.intersectObjects(targets,true).find(hit=>hit.distance<=6.5);
+}
+function interact(place){
+  const hit=pick();
+  if(!hit)return;
+  const entity=mobs.entityForObject(hit.object);
+  if(entity){
+    if(!place){mobs.remove(entity);scheduleSave();notice(`${entity.type} を倒しました`)}
+    return;
+  }
+  const normal=hit.face.normal.clone().transformDirection(hit.object.matrixWorld).round();
+  const p=hit.point.clone().addScaledVector(normal,place?.025:-.025);
+  if(place)p.copy(hit.point).addScaledVector(normal,.025);
+  const x=Math.floor(p.x),y=Math.floor(p.y),z=Math.floor(p.z);
+  if(place){
+    if(Math.abs(x-location.x)<.8&&Math.abs(z-location.z)<.8&&y<location.y+.6&&y+1>location.y-1.6)return;
+    setBlock(x,y,z,slots[selected]);
+  }else if(getBlock(x,y,z)!=='bedrock')setBlock(x,y,z,AIR);
+}
 function openChat(prefill=''){chatOpen=true;document.exitPointerLock?.();$('#chat').classList.remove('hidden');$('#command').value=prefill;$('#command').focus()}
 function closeChat(){chatOpen=false;$('#chat').classList.add('hidden');lockPointer()}
 function chat(text){const log=$('#chatlog');const line=document.createElement('div');line.textContent=text;log.appendChild(line);log.scrollTop=log.scrollHeight;while(log.children.length>16)log.firstChild.remove()}
@@ -777,7 +799,11 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     break;
   }
   case 'kill':{
-    if(parts.length&&parts[0]!=='@s'){chat('使用法 /kill [@s]');break}
+    if(parts[0]==='@e'&&parts.length===1){
+      const count=mobs.entities.length;
+      mobs.clear();scheduleSave();chat(`${count} 体のMobを削除しました`);break;
+    }
+    if(parts.length&&parts[0]!=='@s'){chat('使用法 /kill [@s|@e]');break}
     location={...spawnPosition};vy=0;grounded=false;
     updateChunks();scheduleSave();
     chat('スポーン地点に戻りました');break;

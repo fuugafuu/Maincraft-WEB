@@ -24,11 +24,10 @@ function cuboid(parent,color,size,position){
 }
 
 export class MobWorld {
-  constructor(scene,groundHeight){
+  constructor(scene){
     this.root=new THREE.Group();
     scene.add(this.root);
     this.entities=[];
-    this.groundHeight=groundHeight;
   }
 
   static supports(type){return Object.hasOwn(types,type)}
@@ -77,8 +76,18 @@ export class MobWorld {
   }
 
   remove(entity){
+    if(!entity||!this.entities.includes(entity))return;
     this.root.remove(entity.group);
     this.entities.splice(this.entities.indexOf(entity),1);
+  }
+
+  entityForObject(object){
+    let current=object;
+    while(current&&current!==this.root){
+      if(current.userData.entityId)return this.entities.find(entity=>entity.id===current.userData.entityId);
+      current=current.parent;
+    }
+    return null;
   }
 
   save(){return this.entities.map(({id,type,x,y,z})=>({id,type,x,y,z}))}
