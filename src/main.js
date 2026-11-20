@@ -70,6 +70,34 @@ if(!isTouchDevice){
 const skyClouds=new THREE.Group();scene.add(skyClouds);
 for(let i=0;i<36;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(10+Math.random()*13,.65,4+Math.random()*5),new THREE.MeshBasicMaterial({color:0xf9f9f0,transparent:true,opacity:.74,depthWrite:false}));c.position.set(Math.random()*270-135,52+Math.random()*8,Math.random()*270-135);skyClouds.add(c)}
 const chunkGroup=new THREE.Group();scene.add(chunkGroup);
+const rainCount=isTouchDevice?220:650;
+const rainGeometry=new THREE.BufferGeometry();
+const rainPositions=new Float32Array(rainCount*6);
+const rainDrops=Array.from({length:rainCount},()=>({x:Math.random()*54-27,y:Math.random()*36-8,z:Math.random()*54-27}));
+rainGeometry.setAttribute('position',new THREE.BufferAttribute(rainPositions,3).setUsage(THREE.DynamicDrawUsage));
+const rain=new THREE.LineSegments(rainGeometry,new THREE.LineBasicMaterial({color:0xa6c8ed,transparent:true,opacity:.48,depthWrite:false}));
+rain.frustumCulled=false;
+rain.visible=false;
+scene.add(rain);
+let weather='clear';
+function updateRain(dt){
+  rain.visible=active&&weather!=='clear'&&location.y>0;
+  if(!rain.visible)return;
+  for(let i=0;i<rainCount;i++){
+    const drop=rainDrops[i];
+    drop.y-=dt*19;
+    if(drop.y<-8){drop.y+=36;drop.x=Math.random()*54-27;drop.z=Math.random()*54-27}
+    const offset=i*6;
+    rainPositions[offset]=drop.x;
+    rainPositions[offset+1]=drop.y;
+    rainPositions[offset+2]=drop.z;
+    rainPositions[offset+3]=drop.x-.12;
+    rainPositions[offset+4]=drop.y-.9;
+    rainPositions[offset+5]=drop.z-.07;
+  }
+  rain.position.set(location.x,location.y,location.z);
+  rainGeometry.attributes.position.needsUpdate=true;
+}
 let seed=1,seedString='',worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,spawnPosition=null;
 let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 const keys=new Set();const raycaster=new THREE.Raycaster();raycaster.far=7;
@@ -275,7 +303,7 @@ function readWorldIndex(){
 }
 function saveData(){
   if(!active || !worldId)return;
-  const obj={version:2,id:worldId,worldName,seedString,seed,mode,edits:[...savedEdits],slots,position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay};
+  const obj={version:2,id:worldId,worldName,seedString,seed,mode,edits:[...savedEdits],slots,position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,weather};
   try {
     localStorage.setItem(WORLD_PREFIX+worldId,JSON.stringify(obj));
     const index=readWorldIndex().filter(item=>item.id!==worldId);
@@ -371,7 +399,7 @@ $('#importfile').addEventListener('change',async event=>{
 $('#exportworld').onclick=()=>exportWorld(worldId);
 function stringSeed(s){if(!s)return Math.floor(Math.random()*2147483647);if(/^-?\d+$/.test(s))return Number(BigInt.asIntN(32,BigInt(s)));let h=0;for(const ch of s)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;return h}
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const seed=stringSeed(seedString);newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(seed),seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
 function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();treeColumnCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();treeColumnCache.clear();return n}
 $('#resume').onclick=showWorlds;
@@ -495,7 +523,7 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /time set day|night|noon|midnight /gamemode creative|survival /weather clear|rain /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z /give block /time set day|night|noon|midnight /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate');break;
   case 'seed':chat(`シード: ${seedString} (${seed})`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
@@ -535,7 +563,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
   case 'give':{const id=parts.find(p=>byId[p.replace('minecraft:','')])?.replace('minecraft:','');if(!id){chat('使用法 /give block');break}slots[selected]=id;renderHotbar();void ensureJavaBlock(id);chat(`${id} を入手しました`);break}
   case 'time':{const t=parts.at(-1),named={day:1000,noon:6000,night:13000,midnight:18000};const val=named[t]??Number(t);if(!Number.isFinite(val)){chat('使用法 /time set day|night|noon|midnight');break}timeOfDay=((val%24000)+24000)%24000;updateSun();chat(`時刻 ${timeOfDay}`);break}
   case 'gamemode':{if(!['creative','survival'].includes(parts[0])){chat('使用法 /gamemode creative|survival');break}mode=parts[0];fly=mode==='creative';chat(`ゲームモード ${mode}`);break}
-  case 'weather':chat(`天気を ${parts[0]||'clear'} に設定しました（天候描画は開発中）`);break;
+  case 'weather':{if(!['clear','rain','thunder'].includes(parts[0])||parts.length!==1){chat('使用法 /weather clear|rain|thunder');break}weather=parts[0];updateSun();scheduleSave();chat(`天気を ${weather} に設定しました`);break}
   case 'save':saveData();chat('ワールドを保存しました');break;
   case 'spawnpoint':case 'setworldspawn':{
     const target=parts.length===0?location:xyz();
@@ -553,7 +581,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
   }
   case 'locate':chat('構造物の探索は今後実装予定です');break;
   default:chat(`不明なコマンド: /${cmd}。/help を参照してください`)} }
-function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.cos(a);sun.position.set(location.x+Math.sin(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
+function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.cos(a);sun.position.set(location.x+Math.sin(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
 if(isTouchDevice){
   let lookPointer=null;
   let previousX=0,previousY=0;
@@ -612,6 +640,6 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
       moveVertical(vy*dt);
       if(vy===0&&playerCollides(location.x,location.y-.025,location.z))grounded=true;
     }
-    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();skyClouds.position.x+=dt*.35;water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed}`}}renderer.render(scene,camera)}
+    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();updateRain(dt);skyClouds.position.x+=dt*.35;water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed}`}}renderer.render(scene,camera)}
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});requestAnimationFrame(animate);
 window.addEventListener('beforeunload',saveData);
