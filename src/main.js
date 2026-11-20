@@ -31,6 +31,8 @@ const app = document.getElementById('app');
 app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><label for="javajar">Minecraft 1.21.11 Java Client (.jar)</label><input id="javajar" class="field" type="file" accept=".jar,.zip,application/java-archive"><div id="assetstatus" class="assetstatus">Optional: load textures and models from your own installation, locally in your browser.</div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobtop"><button data-action="pause" aria-label="メニュー">☰</button><button data-action="chat" aria-label="チャットとコマンド">⌨</button><button data-action="fly" aria-label="飛行切り替え">飛行</button></div><div class="mobgroup"><span></span><button data-key="KeyW" aria-label="前進">▲</button><span></span><button data-key="KeyA" aria-label="左移動">◀</button><button data-key="KeyS" aria-label="後退">▼</button><button data-key="KeyD" aria-label="右移動">▶</button></div><div class="mobactions"><button data-key="ControlLeft" aria-label="下降">↓</button><button data-key="Space" aria-label="ジャンプ・上昇">↑</button><button data-action="break" aria-label="破壊">⛏</button><button data-action="place" aria-label="設置">▣</button><button data-action="inventory" aria-label="インベントリ">▦</button></div><div class="mobhint">画面をスワイプして視点移動</div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><input id="itemsearch" class="field" placeholder="Search blocks / ブロック検索" autocomplete="off"><div id="itemcount" class="itemcount"></div><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="loadassets">Load Java 1.21.11 textures</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
 const $=s=>document.querySelector(s);
 $('#resume').insertAdjacentHTML('afterend','<div id="worldlist" class="worldlist hidden" aria-label="保存されたワールド"></div>');
+$('#worldlist').insertAdjacentHTML('afterend','<button class="secondary" id="importworld">ワールドデータを読み込む（JSON）</button><input id="importfile" type="file" accept=".json,application/json" class="hidden" aria-label="ワールドデータファイル">');
+$('#save').insertAdjacentHTML('afterend','<button class="secondary" id="exportworld">ワールドを書き出す（JSON）</button>');
 const game=$('#game'), canvas=document.createElement('canvas');
 const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
 renderer.setPixelRatio(Math.min(devicePixelRatio,isTouchDevice ? 1.5 : 2)); renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.24;game.appendChild(renderer.domElement);
@@ -271,6 +273,8 @@ function showWorlds(){
   const worlds=availableWorlds();
   if(!worlds.length){notice('保存されたワールドがありません');return}
   for(const entry of worlds){
+    const row=document.createElement('div');
+    row.className='world-entry-row';
     const button=document.createElement('button');
     button.className='world-entry';
     button.textContent=entry.name+' · Seed '+(entry.seed||'以前のデータ');
@@ -281,10 +285,64 @@ function showWorlds(){
         newWorld(entry.id==='legacy'?{...data,migrateLegacy:true}:data);
       }catch{notice('ワールドを読み込めませんでした')}
     };
-    container.appendChild(button);
+    const exportButton=document.createElement('button');
+    exportButton.className='world-export';
+    exportButton.textContent='書き出し';
+    exportButton.setAttribute('aria-label',`${entry.name} を書き出す`);
+    exportButton.onclick=()=>exportWorld(entry.id);
+    row.append(button,exportButton);
+    container.appendChild(row);
   }
   container.classList.toggle('hidden',!container.classList.contains('hidden'));
 }
+function exportWorld(id){
+  if(active&&id===worldId)saveData();
+  const data=localStorage.getItem(id==='legacy'?'maincraft.world':WORLD_PREFIX+id);
+  if(!data){notice('ワールドデータがありません');return}
+  const parsed=JSON.parse(data);
+  const file=new Blob([data],{type:'application/json'});
+  const url=URL.createObjectURL(file);
+  const link=document.createElement('a');
+  link.href=url;
+  link.download=`${String(parsed.worldName||'world').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_')}.maincraft.json`;
+  document.body.appendChild(link);
+  link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  notice('ワールドデータを書き出しました');
+}
+function validateImportedWorld(data){
+  if(!data||typeof data!=='object'||Array.isArray(data))return false;
+  if(typeof data.worldName!=='string'||!data.worldName.trim()||data.worldName.length>100)return false;
+  if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
+  if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
+  if(!data.edits.every(entry=>Array.isArray(entry)&&entry.length===2&&/^[-]?\d+,[-]?\d+,[-]?\d+$/.test(entry[0])&&typeof entry[1]==='string'&&entry[1].length<=100))return false;
+  const position=data.position;
+  if(position&&!['x','y','z'].every(axis=>Number.isFinite(position[axis])))return false;
+  return true;
+}
+$('#importworld').onclick=()=>$('#importfile').click();
+$('#importfile').addEventListener('change',async event=>{
+  const file=event.target.files?.[0];
+  event.target.value='';
+  if(!file)return;
+  try{
+    if(file.size>15*1024*1024)throw Error('ファイルが大きすぎます（15MBまで）');
+    const data=JSON.parse(await file.text());
+    if(!validateImportedWorld(data))throw Error('ワールドデータの形式が正しくありません');
+    const id=crypto.randomUUID();
+    const imported={...data,id,version:2,worldName:data.worldName.trim(),seedString:String(data.seedString??data.seed)};
+    const storageKey=WORLD_PREFIX+id;
+    localStorage.setItem(storageKey,JSON.stringify(imported));
+    try{
+      const index=readWorldIndex();
+      index.unshift({id,name:imported.worldName,seed:imported.seedString,updated:Date.now()});
+      localStorage.setItem(WORLD_INDEX_KEY,JSON.stringify(index));
+    }catch(error){localStorage.removeItem(storageKey);throw error}
+    $('#worldlist').classList.add('hidden');
+    notice(`「${imported.worldName}」を読み込みました`);
+  }catch(error){notice(`読み込み失敗: ${error instanceof SyntaxError?'JSONが不正です':error.message}`)}
+});
+$('#exportworld').onclick=()=>exportWorld(worldId);
 function stringSeed(s){if(!s)return Math.floor(Math.random()*2147483647);if(/^-?\d+$/.test(s))return Number(BigInt.asIntN(32,BigInt(s)));let h=0;for(const ch of s)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;return h}
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
 function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}

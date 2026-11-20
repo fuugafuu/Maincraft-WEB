@@ -42,6 +42,10 @@ html,body,#app,#game{overscroll-behavior:none}
 .worldlist{max-height:180px;overflow-y:auto;margin-top:10px;display:grid;gap:6px;text-align:left}
 .world-entry{width:100%;color:#e6f0e5;background:#ffffff12;border:1px solid #ffffff35;border-radius:8px;padding:11px 13px;text-align:left;font-size:13px;overflow-wrap:anywhere}
 .world-entry:hover,.world-entry:focus-visible{background:#ffffff30}
+.world-entry-row{display:flex;align-items:stretch;gap:6px}
+.world-entry-row .world-entry{flex:1;min-width:0}
+.world-export{flex:none;border:1px solid #ffffff35;border-radius:8px;color:#e6f0e5;background:#ffffff12;padding:8px;font-size:12px}
+.world-export:hover,.world-export:focus-visible{background:#ffffff30}
 .itemcount{font-size:12px;color:#b5ccbc;padding:8px 0}
 #itemsearch{margin:8px 0}
 #menu{overflow-y:auto;padding:12px 0}
