@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { loadJavaResources } from './javaAssets.js';
 import './style.css';
 
 const isTouchDevice = matchMedia('(pointer: coarse)').matches;
@@ -21,9 +22,10 @@ const BLOCKS = [
   {id:'bedrock',name:'岩盤',color:0x393b3b},
 ];
 const byId = Object.fromEntries(BLOCKS.map(b=>[b.id,b]));
+let javaResources = null;
 const AIR = 'air', SEA = 9, CHUNK = 16, RADIUS = isTouchDevice ? 1 : 2;
 const app = document.getElementById('app');
-app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobtop"><button data-action="pause" aria-label="メニュー">☰</button><button data-action="chat" aria-label="チャットとコマンド">⌨</button><button data-action="fly" aria-label="飛行切り替え">飛行</button></div><div class="mobgroup"><span></span><button data-key="KeyW" aria-label="前進">▲</button><span></span><button data-key="KeyA" aria-label="左移動">◀</button><button data-key="KeyS" aria-label="後退">▼</button><button data-key="KeyD" aria-label="右移動">▶</button></div><div class="mobactions"><button data-key="ControlLeft" aria-label="下降">↓</button><button data-key="Space" aria-label="ジャンプ・上昇">↑</button><button data-action="break" aria-label="破壊">⛏</button><button data-action="place" aria-label="設置">▣</button><button data-action="inventory" aria-label="インベントリ">▦</button></div><div class="mobhint">画面をスワイプして視点移動</div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
+app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><label for="javajar">Minecraft 1.21.11 Java Client (.jar)</label><input id="javajar" class="field" type="file" accept=".jar,.zip,application/java-archive"><div id="assetstatus" class="assetstatus">Optional: load textures and models from your own installation, locally in your browser.</div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobtop"><button data-action="pause" aria-label="メニュー">☰</button><button data-action="chat" aria-label="チャットとコマンド">⌨</button><button data-action="fly" aria-label="飛行切り替え">飛行</button></div><div class="mobgroup"><span></span><button data-key="KeyW" aria-label="前進">▲</button><span></span><button data-key="KeyA" aria-label="左移動">◀</button><button data-key="KeyS" aria-label="後退">▼</button><button data-key="KeyD" aria-label="右移動">▶</button></div><div class="mobactions"><button data-key="ControlLeft" aria-label="下降">↓</button><button data-key="Space" aria-label="ジャンプ・上昇">↑</button><button data-action="break" aria-label="破壊">⛏</button><button data-action="place" aria-label="設置">▣</button><button data-action="inventory" aria-label="インベントリ">▦</button></div><div class="mobhint">画面をスワイプして視点移動</div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><input id="itemsearch" class="field" placeholder="Search blocks / ブロック検索" autocomplete="off"><div id="itemcount" class="itemcount"></div><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="loadassets">Load Java 1.21.11 textures</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
 const $=s=>document.querySelector(s);
 const game=$('#game'), canvas=document.createElement('canvas');
 const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
@@ -43,30 +45,188 @@ const keys=new Set();const raycaster=new THREE.Raycaster();raycaster.far=7;
 const clamp=THREE.MathUtils.clamp;const key=(x,y,z)=>`${x},${y},${z}`;
 function hash(x,z,s=seed){let n=Math.imul(x,374761393)+Math.imul(z,668265263)+Math.imul(s,1442695041);n=Math.imul(n^(n>>>13),1274126177);return ((n^(n>>>16))>>>0)/4294967295}
 function noise(x,z,scale){const a=Math.floor(x/scale),b=Math.floor(z/scale),u=x/scale-a,v=z/scale-b;const t=u*u*(3-2*u),w=v*v*(3-2*v);const ab=(n,m)=>hash(n,m);return THREE.MathUtils.lerp(THREE.MathUtils.lerp(ab(a,b),ab(a+1,b),t),THREE.MathUtils.lerp(ab(a,b+1),ab(a+1,b+1),t),w)}
-function height(x,z){return Math.floor(5+noise(x,z,86)*13+noise(x+400,z-300,31)*9+noise(x-150,z+80,11)*3)}
+const heightCache=new Map(),treeCache=new Map();
+function height(x,z){
+  const position=`${x},${z}`;
+  if(heightCache.has(position))return heightCache.get(position);
+  const h=Math.floor(5+noise(x,z,86)*13+noise(x+400,z-300,31)*9+noise(x-150,z+80,11)*3);
+  heightCache.set(position,h);
+  return h;
+}
 function surface(x,z){let h=height(x,z);return h<SEA+2?'sand':h>24?'snow':'grass'}
-function treeAt(x,z){return height(x,z)>SEA+2 && height(x,z)<24 && hash(x,z,seed+17)>.989 && hash(x+2,z+1,seed+21)>.35}
-function generatedBlock(x,y,z){if(y<0)return AIR;if(y===0)return 'bedrock';const h=height(x,z);if(y<=h){if(y===h)return surface(x,z);if(y>h-4)return surface(x,z)==='sand'?'sand':'dirt';return 'stone'}for(let tx=x-2;tx<=x+2;tx++)for(let tz=z-2;tz<=z+2;tz++){if(!treeAt(tx,tz))continue;const base=height(tx,tz);const len=4+Math.floor(hash(tx,tz,seed+20)*3);if(x===tx&&z===tz&&y>base&&y<=base+len)return 'wood';const dx=Math.abs(x-tx),dz=Math.abs(z-tz),dy=y-(base+len);if(dx<=2&&dz<=2&&dy>=-2&&dy<=2&&dx+dz+Math.abs(dy)*.4<4.3)return 'leaves'}return AIR}
+function treeAt(x,z){
+  const position=`${x},${z}`;
+  if(treeCache.has(position))return treeCache.get(position);
+  const h=height(x,z);
+  const hasTree=h>SEA+2 && h<24 && hash(x,z,seed+17)>.989 && hash(x+2,z+1,seed+21)>.35;
+  treeCache.set(position,hasTree);
+  return hasTree;
+}
+function generatedBlock(x,y,z){if(y<0)return AIR;if(y===0)return 'bedrock';const h=height(x,z);if(y>h+9)return AIR;if(y<=h){if(y===h)return surface(x,z);if(y>h-4)return surface(x,z)==='sand'?'sand':'dirt';return 'stone'}for(let tx=x-2;tx<=x+2;tx++)for(let tz=z-2;tz<=z+2;tz++){if(!treeAt(tx,tz))continue;const base=height(tx,tz);const len=4+Math.floor(hash(tx,tz,seed+20)*3);if(x===tx&&z===tz&&y>base&&y<=base+len)return 'wood';const dx=Math.abs(x-tx),dz=Math.abs(z-tz),dy=y-(base+len);if(dx<=2&&dz<=2&&dy>=-2&&dy<=2&&dx+dz+Math.abs(dy)*.4<4.3)return 'leaves'}return AIR}
 function getBlock(x,y,z){x=Math.floor(x);y=Math.floor(y);z=Math.floor(z);return savedEdits.get(key(x,y,z))??generatedBlock(x,y,z)}
 function setBlock(x,y,z,id){if(y<1||y>100)return;const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else savedEdits.set(k,id);for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz)}scheduleSave()}
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
 const faces=[{d:[1,0,0],v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]],shade:.8},{d:[-1,0,0],v:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]],shade:.8},{d:[0,1,0],v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]],shade:1.13},{d:[0,-1,0],v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]],shade:.54},{d:[0,0,1],v:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]],shade:.9},{d:[0,0,-1],v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]],shade:.73}];
 const materials={};for(const b of BLOCKS)materials[b.id]=new THREE.MeshLambertMaterial({vertexColors:true,side:b.transparent?THREE.DoubleSide:THREE.FrontSide,transparent:!!b.transparent,opacity:b.transparent?.72:1,depthWrite:!b.transparent});
-function rebuild(cx,cz){const chunkKey=`${cx},${cz}`;const prior=loaded.get(chunkKey);if(prior){chunkGroup.remove(prior);prior.traverse(o=>{if(o.geometry)o.geometry.dispose()})}const group=new THREE.Group();const buffers=new Map();for(const b of BLOCKS)buffers.set(b.id,{pos:[],color:[],normal:[]});
-  for(let x=cx*CHUNK;x<(cx+1)*CHUNK;x++)for(let z=cz*CHUNK;z<(cz+1)*CHUNK;z++)for(let y=0;y<=Math.max(height(x,z)+9,32);y++){const id=getBlock(x,y,z);if(id===AIR||id==='water')continue;const b=byId[id];const out=buffers.get(id);for(let fi=0;fi<6;fi++){const f=faces[fi];const adjacent=getBlock(x+f.d[0],y+f.d[1],z+f.d[2]);if(adjacent!==AIR && !(byId[adjacent]?.transparent&&!b.transparent))continue;const rgb=new THREE.Color(fi===2?(b.top??b.color):(fi===0||fi===1||fi===4||fi===5?(b.side??b.color):b.color));rgb.multiplyScalar(f.shade*(.91+hash(x+fi,z+y)*.15));for(const n of [0,1,2,0,2,3]){const v=f.v[n];out.pos.push(x+v[0],y+v[1],z+v[2]);out.normal.push(...f.d);out.color.push(rgb.r,rgb.g,rgb.b)}}}
-  for(const [id,buf] of buffers){if(!buf.pos.length)continue;const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(buf.pos,3));geometry.setAttribute('normal',new THREE.Float32BufferAttribute(buf.normal,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(buf.color,3));geometry.computeBoundingSphere();const mesh=new THREE.Mesh(geometry,materials[id]);mesh.userData.blockId=id;mesh.receiveShadow=true;mesh.castShadow=id!=='leaves'&&id!=='glass';group.add(mesh)}loaded.set(chunkKey,group);chunkGroup.add(group)}
+function rebuild(cx,cz){
+  const chunkKey=`${cx},${cz}`;
+  const prior=loaded.get(chunkKey);
+  if(prior){chunkGroup.remove(prior);prior.traverse(o=>o.geometry?.dispose())}
+  const group=new THREE.Group();
+  const buffers=new Map();
+  const textured=[{pos:[],uv:[],color:[]},{pos:[],uv:[],color:[]}];
+  for(let x=cx*CHUNK;x<(cx+1)*CHUNK;x++)
+  for(let z=cz*CHUNK;z<(cz+1)*CHUNK;z++)
+  for(let y=0;y<=Math.max(height(x,z)+9,32);y++){
+    const id=getBlock(x,y,z);
+    if(id===AIR||id==='water')continue;
+    const b=byId[id];
+    if(!b)continue;
+    const native=javaResources?.getModel(id);
+    if(native?.elements.length){
+      const output=textured[Number(native.transparent)];
+      javaResources.addBlock(output,native,x,y,z,(dx,dy,dz)=>{
+        const neighbor=getBlock(x+dx,y+dy,z+dz);
+        return (byId[neighbor]?.transparent)?AIR:neighbor;
+      },id);
+      continue;
+    }
+    if(!buffers.has(id))buffers.set(id,{pos:[],color:[],normal:[]});
+    const out=buffers.get(id);
+    for(let fi=0;fi<6;fi++){
+      const f=faces[fi];
+      const adjacent=getBlock(x+f.d[0],y+f.d[1],z+f.d[2]);
+      if(adjacent!==AIR && !(byId[adjacent]?.transparent&&!b.transparent))continue;
+      const rgb=new THREE.Color(fi===2?(b.top??b.color):(fi===0||fi===1||fi===4||fi===5?(b.side??b.color):b.color));
+      rgb.multiplyScalar(f.shade*(.91+hash(x+fi,z+y)*.15));
+      for(const n of [0,1,2,0,2,3]){
+        const v=f.v[n];
+        out.pos.push(x+v[0],y+v[1],z+v[2]);
+        out.normal.push(...f.d);
+        out.color.push(rgb.r,rgb.g,rgb.b);
+      }
+    }
+  }
+  for(const [id,buf] of buffers){
+    if(!buf.pos.length)continue;
+    const geometry=new THREE.BufferGeometry();
+    geometry.setAttribute('position',new THREE.Float32BufferAttribute(buf.pos,3));
+    geometry.setAttribute('normal',new THREE.Float32BufferAttribute(buf.normal,3));
+    geometry.setAttribute('color',new THREE.Float32BufferAttribute(buf.color,3));
+    geometry.computeBoundingSphere();
+    const mesh=new THREE.Mesh(geometry,materials[id]);
+    mesh.userData.blockId=id;
+    mesh.receiveShadow=true;
+    mesh.castShadow=id!=='leaves'&&id!=='glass';
+    group.add(mesh);
+  }
+  if(javaResources){
+    for(let i=0;i<2;i++){
+      const buf=textured[i];
+      if(!buf.pos.length)continue;
+      const geometry=new THREE.BufferGeometry();
+      geometry.setAttribute('position',new THREE.Float32BufferAttribute(buf.pos,3));
+      geometry.setAttribute('uv',new THREE.Float32BufferAttribute(buf.uv,2));
+      geometry.setAttribute('color',new THREE.Float32BufferAttribute(buf.color,3));
+      geometry.computeVertexNormals();
+      geometry.computeBoundingSphere();
+      const mesh=new THREE.Mesh(geometry,i?javaResources.glassMaterial:javaResources.opaqueMaterial);
+      mesh.receiveShadow=true;
+      mesh.castShadow=!i;
+      group.add(mesh);
+    }
+  }
+  loaded.set(chunkKey,group);
+  chunkGroup.add(group);
+}
 function updateChunks(){const cx=Math.floor(location.x/CHUNK),cz=Math.floor(location.z/CHUNK);if(cx===lastChunkX&&cz===lastChunkZ)return;lastChunkX=cx;lastChunkZ=cz;for(let a=cx-RADIUS;a<=cx+RADIUS;a++)for(let b=cz-RADIUS;b<=cz+RADIUS;b++)if(!loaded.has(`${a},${b}`))rebuild(a,b);for(const [k,g] of loaded)if(Math.abs(Number(k.split(',')[0])-cx)>RADIUS||Math.abs(Number(k.split(',')[1])-cz)>RADIUS){chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose());loaded.delete(k)}water.position.x=cx*CHUNK;water.position.z=cz*CHUNK;sun.position.set(location.x+50,80,location.z+30);sun.target.position.set(location.x,0,location.z);sun.target.updateMatrixWorld()}
 function saveData(){if(!active)return;const obj={version:1,worldName,seedString,seed,mode,edits:[...savedEdits],slots,position:location,timeOfDay};try{localStorage.setItem('maincraft.world',JSON.stringify(obj))}catch{notice('保存容量の上限に達しました')}}let saveTimer;function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveData,900)}
 function stringSeed(s){if(!s)return Math.floor(Math.random()*2147483647);if(/^-?\d+$/.test(s))return Number(BigInt.asIntN(32,BigInt(s)));let h=0;for(const ch of s)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;return h}
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
+function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const seed=stringSeed(seedString);newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(seed),seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
-function heightFor(s,x,z){const old=seed;seed=s;const n=height(x,z);seed=old;return n}
+function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();return n}
 $('#resume').onclick=()=>{try{const data=JSON.parse(localStorage.getItem('maincraft.world'));if(!data)throw Error();newWorld(data)}catch{notice('保存されたワールドがありません');alert('保存されたワールドがありません')}};
+function registerBlock(id){
+  if(byId[id])return;
+  let value=0;
+  for(const char of id)value=(Math.imul(value,31)+char.charCodeAt(0))|0;
+  const tint=new THREE.Color().setHSL((value>>>0)%360/360,.22,.45);
+  const block={id,name:id.replaceAll('_',' '),color:tint.getHex(),transparent:/glass|ice|leaves|pane|grate|bars/.test(id)};
+  BLOCKS.push(block);
+  byId[id]=block;
+  materials[id]=materials.stone;
+}
+async function ensureJavaBlock(id){
+  if(!javaResources)return;
+  try{
+    const model=await javaResources.ensure(id);
+    if(model&&byId[id])byId[id].transparent=model.transparent;
+    if(active&&model){
+      for(const chunk of [...loaded.keys()]){
+        const [cx,cz]=chunk.split(',').map(Number);
+        rebuild(cx,cz);
+      }
+    }
+  }catch(error){notice(`Model import: ${error.message}`)}
+}
+async function importJavaJar(file){
+  if(!file)return;
+  const status=$('#assetstatus');
+  status.textContent='Reading Java 1.21.11 resources…';
+  try{
+    const imported=await loadJavaResources(file,message=>status.textContent=message);
+    for(const name of imported.blockNames)registerBlock(name);
+    const old=javaResources;
+    javaResources=imported;
+    for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock'])){
+      await javaResources.ensure(id);
+    }
+    for(const id of new Set([...savedEdits.values()])){
+      if(id!=='air')await javaResources.ensure(id);
+    }
+    old?.dispose();
+    if(active)for(const chunk of [...loaded.keys()]){
+      const [cx,cz]=chunk.split(',').map(Number);
+      rebuild(cx,cz);
+    }
+    status.textContent=`Java 1.21.11 loaded · ${imported.blockNames.length} blockstate IDs · ${imported.textureCount()} textures`;
+    notice(status.textContent);
+  }catch(error){
+    status.textContent=`Asset import failed: ${error.message}`;
+    notice(status.textContent);
+  }
+}
+$('#javajar').addEventListener('change',event=>{
+  importJavaJar(event.target.files?.[0]);
+  event.target.value='';
+});
+$('#loadassets').onclick=()=>$('#javajar').click();
 function renderHotbar(){$('#hotbar').innerHTML=slots.map((id,i)=>`<div class="slot ${i===selected?'selected':''}" data-slot="${i}"><em>${i+1}</em><i style="background:#${(byId[id]?.color??0xffffff).toString(16).padStart(6,'0')}"></i></div>`).join('');$('#selected-name').textContent=byId[slots[selected]]?.name??slots[selected];$$('.slot').forEach(s=>s.onclick=()=>{selected=Number(s.dataset.slot);renderHotbar()})}
 function $$(s){return [...document.querySelectorAll(s)]}
 function notice(msg){const el=$('#notice');el.textContent=msg;el.classList.add('show');clearTimeout(notice.timeout);notice.timeout=setTimeout(()=>el.classList.remove('show'),2400)}
-function openInventory(){inventoryOpen=true;document.exitPointerLock?.();$('#inventory').classList.remove('hidden');$('#items').innerHTML=BLOCKS.filter(b=>b.id!=='bedrock').map(b=>`<button class="item-tile" data-id="${b.id}"><i style="background:#${b.color.toString(16).padStart(6,'0')}"></i>${b.name}</button>`).join('');$$('.item-tile').forEach(el=>el.onclick=()=>{slots[selected]=el.dataset.id;renderHotbar();closeInventory();scheduleSave()})}
+function renderInventory(query=''){
+  const matches=BLOCKS.filter(b=>b.id!=='bedrock'&&(b.id.includes(query.toLowerCase())||b.name.includes(query)));
+  $('#itemcount').textContent=`${matches.length} blocks · displaying ${Math.min(matches.length,120)}`;
+  $('#items').innerHTML=matches.slice(0,120).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="background:#${b.color.toString(16).padStart(6,'0')}"></i>${b.name}</button>`).join('');
+  $$('.item-tile').forEach(el=>el.onclick=async()=>{
+    const id=el.dataset.id;
+    slots[selected]=id;
+    renderHotbar();
+    closeInventory();
+    scheduleSave();
+    await ensureJavaBlock(id);
+  });
+}
+function openInventory(){
+  inventoryOpen=true;
+  document.exitPointerLock?.();
+  $('#inventory').classList.remove('hidden');
+  $('#itemsearch').value='';
+  renderInventory();
+  if(!isTouchDevice)$('#itemsearch').focus();
+}
+$('#itemsearch').addEventListener('input',e=>renderInventory(e.target.value.trim()));
 function closeInventory(){inventoryOpen=false;$('#inventory').classList.add('hidden');if(active&&!paused)lockPointer()}
 $('#closeinv').onclick=closeInventory;
 function pause(){if(!active)return;paused=true;document.exitPointerLock?.();$('#pause').classList.remove('hidden')}
