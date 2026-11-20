@@ -1126,7 +1126,7 @@ function writeBlock(x,y,z,id){
   else savedEdits.set(position,id);
 }
 function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWith('/')){chat(`<${worldName}> ${input}`);return}const parts=input.slice(1).split(/\s+/),cmd=parts.shift().toLowerCase();const xyz=(offset=0)=>parts.slice(offset,offset+3).map((v,i)=>{const base=[location.x,location.y,location.z][i];return v?.startsWith('~')?Math.floor(base)+Number(v.slice(1)||0):Number(v)});const valid=v=>v.every(Number.isFinite)&&v.every(Number.isInteger);const inWorld=v=>valid(v)&&v[1]>=1&&v[1]<=100;const volume=(a,b)=>(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);const bounds=(a,b)=>a.map((n,i)=>[Math.min(n,b[i]),Math.max(n,b[i])]);
-  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block [count] /clear [@s] [item] [maxCount] /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
+  switch(cmd){case 'help':chat('/help /seed /tp x y z /setblock x y z block [keep|replace] /fill x1 y1 z1 x2 y2 z2 block [replace [filter]|keep|hollow|outline] /clone x1 y1 z1 x2 y2 z2 x y z [replace|masked|filtered block] [normal|force|move] /give block [count] /clear [@s] [item] [maxCount] /item replace entity @s <slot> with <item> [count] /item replace block x y z container.N with <item> [count] /summon pig|cow|sheep|zombie|creeper [x y z] /damage @s|@e amount /time set|add|query /gamerule doDaylightCycle true|false /gamemode creative|survival /weather clear|rain|thunder /save /spawnpoint [x y z] /setworldspawn [x y z] /kill /locate biome <biome> /locate structure desert_well');break;
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;fallDistance=0;grounded=false;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
@@ -1227,6 +1227,50 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     }
     if(maxCount!==0){renderHotbar();scheduleSave()}
     chat(maxCount===0?`${affected} 個のアイテムが見つかりました`:`${affected} 個のアイテムを削除しました`);
+    break;
+  }
+  case 'item':{
+    if(parts[0]==='replace'&&parts[1]==='block'){
+      const coords=xyz(2);
+      const slotMatch=/^container\.(\d{1,2})$/.exec(parts[5]??'');
+      const index=slotMatch?Number(slotMatch[1]):-1;
+      const id=parts[7]?.replace(/^minecraft:/,'');
+      const count=parts[8]===undefined?1:Number(parts[8]);
+      if(parts.length<8||parts.length>9||!inWorld(coords)||getBlock(...coords)!=='chest'||
+        index<0||index>=27||parts[6]!=='with'||!(byId[id]||foodById[id])||
+        !Number.isInteger(count)||count<1||count>64){
+        chat('使用法 /item replace block x y z container.0 with <item> [1〜64]（チェストのみ）');break;
+      }
+      const position=key(...coords);
+      const chest=chestContents.get(position)??{items:Array(27).fill(AIR),counts:Array(27).fill(0)};
+      chest.items[index]=id;
+      chest.counts[index]=count;
+      chestContents.set(position,chest);
+      if(openChestKey===position)renderInventory();
+      if(!foodById[id])void ensureJavaBlock(id);
+      scheduleSave();
+      chat(`チェスト ${position} の container.${index} に ${id} を ${count} 個設定しました`);
+      break;
+    }
+    const [operation,scope,target,slotName,action,rawId,rawCount]=parts;
+    const id=rawId?.replace(/^minecraft:/,'');
+    const count=rawCount===undefined?1:Number(rawCount);
+    const hotbar=/^hotbar\.([0-8])$/.exec(slotName??'');
+    const inventory=/^inventory\.(\d{1,2})$/.exec(slotName??'');
+    const index=hotbar?Number(hotbar[1]):inventory?Number(inventory[1]):slotName==='weapon.mainhand'?selected:-1;
+    const container=inventory?storageSlots:slots;
+    const quantities=inventory?storageCounts:slotCounts;
+    if(operation!=='replace'||scope!=='entity'||target!=='@s'||action!=='with'||
+      parts.length<6||parts.length>7||index<0||index>=container.length||
+      !(byId[id]||foodById[id])||!Number.isInteger(count)||count<1||count>64){
+      chat('使用法 /item replace entity @s hotbar.0|inventory.0|weapon.mainhand with <item> [1〜64]');break;
+    }
+    container[index]=id;
+    quantities[index]=count;
+    renderHotbar();
+    if(!foodById[id])void ensureJavaBlock(id);
+    scheduleSave();
+    chat(`${slotName} に ${id} を ${count} 個設定しました`);
     break;
   }
   case 'damage':{
