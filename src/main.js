@@ -39,7 +39,7 @@ const water=new THREE.Mesh(new THREE.PlaneGeometry(250,250,1,1),waterMaterial);w
 const skyClouds=new THREE.Group();scene.add(skyClouds);
 for(let i=0;i<36;i++){const c=new THREE.Mesh(new THREE.BoxGeometry(10+Math.random()*13,.65,4+Math.random()*5),new THREE.MeshBasicMaterial({color:0xf9f9f0,transparent:true,opacity:.74,depthWrite:false}));c.position.set(Math.random()*270-135,52+Math.random()*8,Math.random()*270-135);skyClouds.add(c)}
 const chunkGroup=new THREE.Group();scene.add(chunkGroup);
-let seed=1,seedString='',worldName='',mode='creative',savedEdits=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000;
+let seed=1,seedString='',worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000;
 let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 const keys=new Set();const raycaster=new THREE.Raycaster();raycaster.far=7;
 const clamp=THREE.MathUtils.clamp;const key=(x,y,z)=>`${x},${y},${z}`;
@@ -92,6 +92,18 @@ function generatedBlock(x,y,z){
   return AIR;
 }
 function getBlock(x,y,z){x=Math.floor(x);y=Math.floor(y);z=Math.floor(z);return savedEdits.get(key(x,y,z))??generatedBlock(x,y,z)}
+function rememberEditHeight(x,y,z){
+  const chunk=`${Math.floor(x/CHUNK)},${Math.floor(z/CHUNK)}`;
+  editedChunkHeights.set(chunk,Math.max(y,editedChunkHeights.get(chunk)??0));
+}
+function rebuildEditedChunkHeights(){
+  editedChunkHeights.clear();
+  for(const [position,id] of savedEdits){
+    if(id===AIR)continue;
+    const [x,y,z]=position.split(',').map(Number);
+    rememberEditHeight(x,y,z);
+  }
+}
 const PLAYER_RADIUS=.3, PLAYER_EYE=1.62, PLAYER_HEIGHT=1.8;
 function isSolid(id){
   return id!==AIR && id!=='water' && !/^(lava|.*_torch|.*_flower|.*_sapling|.*_grass|.*_fern|.*_mushroom|.*_carpet|.*_rail|.*_button|.*_pressure_plate|.*_sign|.*_banner|.*_vine|.*_seagrass|.*_coral_fan|.*_candle|redstone_wire|tripwire|lever|ladder|fire|soul_fire)$/.test(id);
@@ -125,7 +137,7 @@ function moveVertical(dy){
     location.y+=step;
   }
 }
-function setBlock(x,y,z,id){if(y<1||y>100)return;const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else savedEdits.set(k,id);for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz)}scheduleSave()}
+function setBlock(x,y,z,id){if(y<1||y>100)return;const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else {savedEdits.set(k,id);if(id!==AIR)rememberEditHeight(x,y,z)}for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz)}scheduleSave()}
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
 const faces=[{d:[1,0,0],v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]],shade:.8},{d:[-1,0,0],v:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]],shade:.8},{d:[0,1,0],v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]],shade:1.13},{d:[0,-1,0],v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]],shade:.54},{d:[0,0,1],v:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]],shade:.9},{d:[0,0,-1],v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]],shade:.73}];
 const materials={};for(const b of BLOCKS)materials[b.id]=new THREE.MeshLambertMaterial({vertexColors:true,side:b.transparent?THREE.DoubleSide:THREE.FrontSide,transparent:!!b.transparent,opacity:b.transparent?.72:1,depthWrite:!b.transparent});
@@ -138,7 +150,7 @@ function rebuild(cx,cz){
   const textured=[{pos:[],uv:[],color:[]},{pos:[],uv:[],color:[]}];
   for(let x=cx*CHUNK;x<(cx+1)*CHUNK;x++)
   for(let z=cz*CHUNK;z<(cz+1)*CHUNK;z++)
-  for(let y=0;y<=Math.max(height(x,z)+9,32);y++){
+  for(let y=0;y<=Math.max(height(x,z)+9,32,editedChunkHeights.get(chunkKey)??0);y++){
     const id=getBlock(x,y,z);
     if(id===AIR||id==='water')continue;
     const b=byId[id];
@@ -228,7 +240,7 @@ function loadNextChunk(){
 function saveData(){if(!active)return;const obj={version:1,worldName,seedString,seed,mode,edits:[...savedEdits],slots,position:location,timeOfDay};try{localStorage.setItem('maincraft.world',JSON.stringify(obj))}catch{notice('保存容量の上限に達しました')}}let saveTimer;function scheduleSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveData,900)}
 function stringSeed(s){if(!s)return Math.floor(Math.random()*2147483647);if(/^-?\d+$/.test(s))return Number(BigInt.asIntN(32,BigInt(s)));let h=0;for(const ch of s)h=(Math.imul(31,h)+ch.charCodeAt(0))|0;return h}
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
+function newWorld(data){worldName=data.worldName;seedString=data.seedString;seed=data.seed;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=0;pitch=0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed}`);saveData();lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const seed=stringSeed(seedString);newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(seed),seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
 function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();treeColumnCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();treeColumnCache.clear();return n}
 $('#resume').onclick=()=>{try{const data=JSON.parse(localStorage.getItem('maincraft.world'));if(!data)throw Error();newWorld(data)}catch{notice('保存されたワールドがありません');alert('保存されたワールドがありません')}};
@@ -333,7 +345,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
   case 'seed':chat(`シード: ${seedString} (${seed})`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;updateChunks();chat('テレポートしました');break}
   case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:','');if(!valid(p)||!byId[id]){chat('使用法 /setblock x y z block');break}setBlock(...p,id);chat(`ブロックを設置しました ${id}`);break}
-  case 'fill':{const a=xyz(),b=xyz(3),id=parts[6]?.replace('minecraft:','');if(!valid(a)||!valid(b)||!byId[id]){chat('使用法 /fill x1 y1 z1 x2 y2 z2 block');break}const count=(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);if(count>4096){chat('一度に変更できるのは4096ブロックまでです');break}for(let x=Math.min(a[0],b[0]);x<=Math.max(a[0],b[0]);x++)for(let z=Math.min(a[2],b[2]);z<=Math.max(a[2],b[2]);z++)for(let y=Math.max(1,Math.min(a[1],b[1]));y<=Math.min(100,Math.max(a[1],b[1]));y++){const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else savedEdits.set(k,id)}for(const [k,g] of [...loaded]){const [cx,cz]=k.split(',').map(Number);rebuild(cx,cz)}scheduleSave();chat(`${count} ブロックを変更しました`);break}
+  case 'fill':{const a=xyz(),b=xyz(3),id=parts[6]?.replace('minecraft:','');if(!valid(a)||!valid(b)||!byId[id]){chat('使用法 /fill x1 y1 z1 x2 y2 z2 block');break}const count=(Math.abs(a[0]-b[0])+1)*(Math.abs(a[1]-b[1])+1)*(Math.abs(a[2]-b[2])+1);if(count>4096){chat('一度に変更できるのは4096ブロックまでです');break}for(let x=Math.min(a[0],b[0]);x<=Math.max(a[0],b[0]);x++)for(let z=Math.min(a[2],b[2]);z<=Math.max(a[2],b[2]);z++)for(let y=Math.max(1,Math.min(a[1],b[1]));y<=Math.min(100,Math.max(a[1],b[1]));y++){const k=key(x,y,z);if(id===generatedBlock(x,y,z))savedEdits.delete(k);else {savedEdits.set(k,id);if(id!==AIR)rememberEditHeight(x,y,z)}}for(const [k,g] of [...loaded]){const [cx,cz]=k.split(',').map(Number);rebuild(cx,cz)}scheduleSave();chat(`${count} ブロックを変更しました`);break}
   case 'give':{const id=parts.find(p=>byId[p.replace('minecraft:','')])?.replace('minecraft:','');if(!id){chat('使用法 /give block');break}slots[selected]=id;renderHotbar();chat(`${id} を入手しました`);break}
   case 'time':{const t=parts.at(-1),named={day:1000,noon:6000,night:13000,midnight:18000};const val=named[t]??Number(t);if(!Number.isFinite(val)){chat('使用法 /time set day|night|noon|midnight');break}timeOfDay=((val%24000)+24000)%24000;updateSun();chat(`時刻 ${timeOfDay}`);break}
   case 'gamemode':{if(!['creative','survival'].includes(parts[0])){chat('使用法 /gamemode creative|survival');break}mode=parts[0];fly=mode==='creative';chat(`ゲームモード ${mode}`);break}
