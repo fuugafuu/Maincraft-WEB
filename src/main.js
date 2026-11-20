@@ -134,20 +134,43 @@ function generatedOre(x,y,z,h){
   if(y<h-3&&noise3(x-71,y,z-193,8)>.79)return 'coal_ore';
   return 'stone';
 }
-const heightCache=new Map(),treeCache=new Map(),treeColumnCache=new Map();
+const heightCache=new Map(),biomeCache=new Map(),treeCache=new Map(),treeColumnCache=new Map();
+function biome(x,z){
+  if(worldgenVersion<4)return 'plains';
+  const position=`${x},${z}`;
+  if(biomeCache.has(position))return biomeCache.get(position);
+  const temperature=noise(x+1200,z-1800,190);
+  const humidity=noise(x-2400,z+3600,170);
+  const ruggedness=noise(x+700,z+900,220);
+  let result='plains';
+  if(ruggedness>.7)result='mountains';
+  else if(temperature<.35)result='snowy_plains';
+  else if(temperature>.56&&humidity<.39)result='desert';
+  else if(humidity>.57)result='forest';
+  biomeCache.set(position,result);
+  return result;
+}
 function height(x,z){
   const position=`${x},${z}`;
   if(heightCache.has(position))return heightCache.get(position);
-  const h=Math.floor(5+noise(x,z,86)*13+noise(x+400,z-300,31)*9+noise(x-150,z+80,11)*3);
+  let elevation=5+noise(x,z,86)*13+noise(x+400,z-300,31)*9+noise(x-150,z+80,11)*3;
+  if(worldgenVersion>=4){
+    const continental=noise(x-1300,z+1500,250);
+    const ruggedness=noise(x+700,z+900,220);
+    elevation+=(continental-.5)*13+Math.max(0,ruggedness-.57)*36;
+  }
+  const h=Math.max(2,Math.floor(elevation));
   heightCache.set(position,h);
   return h;
 }
-function surface(x,z){let h=height(x,z);return h<SEA+2?'sand':h>24?'snow':'grass'}
+function surface(x,z){let h=height(x,z);if(worldgenVersion>=4){const region=biome(x,z);if(region==='desert'||h<SEA+2)return 'sand';if(region==='snowy_plains'||region==='mountains'&&h>27)return 'snow';return 'grass'}return h<SEA+2?'sand':h>24?'snow':'grass'}
 function treeAt(x,z){
   const position=`${x},${z}`;
   if(treeCache.has(position))return treeCache.get(position);
   const h=height(x,z);
-  const hasTree=h>SEA+2 && h<24 && hash(x,z,seed+17)>.989 && hash(x+2,z+1,seed+21)>.35;
+  const region=biome(x,z);
+  const threshold=worldgenVersion>=4&&region==='forest'?.962:.989;
+  const hasTree=h>SEA+2 && (worldgenVersion>=4?h<45&&region!=='desert'&&region!=='mountains'&&region!=='snowy_plains':h<24) && hash(x,z,seed+17)>threshold && hash(x+2,z+1,seed+21)>.35;
   treeCache.set(position,hasTree);
   return hasTree;
 }
@@ -423,7 +446,7 @@ function validateImportedWorld(data){
   if(typeof data.worldName!=='string'||!data.worldName.trim()||data.worldName.length>100)return false;
   if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
   if(data.seed64!==undefined&&(typeof data.seed64!=='string'||!isSignedLong(data.seed64)))return false;
-  if(data.worldgenVersion!==undefined&&![1,2,3].includes(data.worldgenVersion))return false;
+  if(data.worldgenVersion!==undefined&&![1,2,3,4].includes(data.worldgenVersion))return false;
   if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
   if(!data.edits.every(entry=>Array.isArray(entry)&&entry.length===2&&/^[-]?\d+,[-]?\d+,[-]?\d+$/.test(entry[0])&&typeof entry[1]==='string'&&entry[1].length<=100))return false;
   const position=data.position;
@@ -467,9 +490,8 @@ function stringSeed(s){
   return BigInt(hash);
 }
 function lockPointer(){if(!isTouchDevice)renderer.domElement.requestPointerLock?.()}
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
-$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:3,seed,mode:$('#mode').value,edits:[],position:{x:0,y:heightFor(seed,0,0)+4,z:0}})};
-function heightFor(s,x,z){const old=seed;seed=s;heightCache.clear();treeCache.clear();treeColumnCache.clear();const n=height(x,z);seed=old;heightCache.clear();treeCache.clear();treeColumnCache.clear();return n}
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed=data.seed;seed64=data.seed64??String(seed);worldgenVersion=data.worldgenVersion??1;heightCache.clear();biomeCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+$('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:4,seed,mode:$('#mode').value,edits:[]})};
 $('#resume').onclick=showWorlds;
 function registerBlock(id){
   if(byId[id])return;
