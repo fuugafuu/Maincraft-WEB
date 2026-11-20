@@ -626,12 +626,29 @@ function validateImportedWorld(data){
   if(!Number.isInteger(data.seed)||!['creative','survival'].includes(data.mode))return false;
   if(data.seed64!==undefined&&(typeof data.seed64!=='string'||!isSignedLong(data.seed64)))return false;
   if(data.playerHealth!==undefined&&(!Number.isInteger(data.playerHealth)||data.playerHealth<1||data.playerHealth>20))return false;
+  if(data.slots!==undefined&&(!Array.isArray(data.slots)||data.slots.length!==9||!data.slots.every(id=>typeof id==='string'&&id.length<=100)))return false;
   if(data.foodLevel!==undefined&&(!Number.isInteger(data.foodLevel)||data.foodLevel<0||data.foodLevel>20))return false;
   if(data.foodSaturation!==undefined&&(!Number.isFinite(data.foodSaturation)||data.foodSaturation<0||data.foodSaturation>20))return false;
   if(data.foodExhaustion!==undefined&&(!Number.isFinite(data.foodExhaustion)||data.foodExhaustion<0||data.foodExhaustion>100))return false;
   if(data.slotCounts!==undefined&&(!Array.isArray(data.slotCounts)||data.slotCounts.length!==9||!data.slotCounts.every(count=>Number.isInteger(count)&&count>=0&&count<=64)))return false;
   if(data.storageSlots!==undefined&&(!Array.isArray(data.storageSlots)||data.storageSlots.length!==27||!data.storageSlots.every(id=>typeof id==='string'&&id.length<=100)))return false;
   if(data.storageCounts!==undefined&&(!Array.isArray(data.storageCounts)||data.storageCounts.length!==27||!data.storageCounts.every(count=>Number.isInteger(count)&&count>=0&&count<=64)))return false;
+  if(data.craftGrid!==undefined&&(!Array.isArray(data.craftGrid)||![4,9].includes(data.craftGrid.length)||!data.craftGrid.every(id=>typeof id==='string'&&id.length<=100)))return false;
+  if(data.craftingTableOpen!==undefined&&typeof data.craftingTableOpen!=='boolean')return false;
+  if(data.chestContents!==undefined){
+    if(!Array.isArray(data.chestContents)||data.chestContents.length>200000)return false;
+    const seen=new Set();
+    for(const entry of data.chestContents){
+      if(!Array.isArray(entry)||entry.length!==2)return false;
+      const [position,chest]=entry;
+      if(typeof position!=='string'||!/^[-]?\d+,[-]?\d+,[-]?\d+$/.test(position)||seen.has(position))return false;
+      seen.add(position);
+      if(!chest||typeof chest!=='object'||!Array.isArray(chest.items)||chest.items.length!==27||
+         !chest.items.every(id=>typeof id==='string'&&id.length<=100)||
+         !Array.isArray(chest.counts)||chest.counts.length!==27||
+         !chest.counts.every(count=>Number.isInteger(count)&&count>=0&&count<=64))return false;
+    }
+  }
   if(data.worldgenVersion!==undefined&&![1,2,3,4,5].includes(data.worldgenVersion))return false;
   if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
   if(data.entities!==undefined&&(!Array.isArray(data.entities)||data.entities.length>128||!data.entities.every(entity=>entity&&typeof entity==='object'&&MobWorld.supports(entity.type)&&['x','y','z'].every(axis=>Number.isFinite(entity[axis])))))return false;
