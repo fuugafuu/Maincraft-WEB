@@ -39,6 +39,15 @@ const FOODS = [
 ];
 const byId = Object.fromEntries(BLOCKS.map(b=>[b.id,b]));
 const foodById=Object.fromEntries(FOODS.map(food=>[food.id,food]));
+const ITEMS=[];
+const itemById=Object.create(null);
+const knownItem=id=>Boolean(byId[id]||foodById[id]||itemById[id]);
+const itemInfo=id=>byId[id]??foodById[id]??itemById[id];
+function itemStyle(id){
+  const icon=javaResources?.itemIcon(id);
+  if(icon)return `background-image:url('${icon}');background-size:contain;background-position:center;background-repeat:no-repeat`;
+  return `background:#${(itemInfo(id)?.color??0xffffff).toString(16).padStart(6,'0')}`;
+}
 const AIR = 'air', SEA = 9, CHUNK = 16, RADIUS = isTouchDevice ? 1 : 2;
 const CRAFTING_RECIPES=[
   {id:'planks',name:'オークの板材 ×4',pattern:['wood'],amount:4},
@@ -723,6 +732,12 @@ function registerBlock(id){
   byId[id]=block;
   materials[id]=materials.stone;
 }
+function registerItem(id){
+  if(knownItem(id))return;
+  const item={id,name:id.replaceAll('_',' '),color:0xc4b89e};
+  ITEMS.push(item);
+  itemById[id]=item;
+}
 async function ensureJavaBlock(id){
   if(!javaResources)return;
   try{
@@ -743,6 +758,7 @@ async function importJavaJar(file){
   try{
     const imported=await loadJavaResources(file,message=>status.textContent=message);
     for(const name of imported.blockNames)registerBlock(name);
+    for(const name of imported.itemNames)registerItem(name);
     const old=javaResources;
     javaResources=imported;
     for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock','sandstone','coal_ore','iron_ore','gold_ore','diamond_ore'])){
@@ -756,7 +772,9 @@ async function importJavaJar(file){
       const [cx,cz]=chunk.split(',').map(Number);
       rebuild(cx,cz);
     }
-    status.textContent=`Java 1.21.11 loaded · ${imported.blockNames.length} blockstate IDs · ${imported.textureCount()} textures`;
+    renderHotbar();
+    if(inventoryOpen)renderInventory($('#itemsearch').value.trim());
+    status.textContent=`Java 1.21.11 loaded · ${imported.blockNames.length} blocks · ${imported.itemNames.length} items · ${imported.textureCount()} textures`;
     notice(status.textContent);
   }catch(error){
     status.textContent=`Asset import failed: ${error.message}`;
@@ -768,7 +786,7 @@ $('#javajar').addEventListener('change',event=>{
   event.target.value='';
 });
 $('#loadassets').onclick=()=>$('#javajar').click();
-function renderHotbar(){$('#hotbar').innerHTML=slots.map((id,i)=>`<div class="slot ${i===selected?'selected':''}" data-slot="${i}"><em>${i+1}</em><i style="background:#${(byId[id]?.color??foodById[id]?.color??0xffffff).toString(16).padStart(6,'0')}"></i>${mode==='survival'&&id!==AIR&&slotCounts[i]>0?`<small>${slotCounts[i]}</small>`:''}</div>`).join('');$('#selected-name').textContent=byId[slots[selected]]?.name??foodById[slots[selected]]?.name??slots[selected];$$('.slot').forEach(s=>s.onclick=()=>{selected=Number(s.dataset.slot);renderHotbar()})}
+function renderHotbar(){$('#hotbar').innerHTML=slots.map((id,i)=>`<div class="slot ${i===selected?'selected':''}" data-slot="${i}"><em>${i+1}</em><i style="${itemStyle(id)}"></i>${mode==='survival'&&id!==AIR&&slotCounts[i]>0?`<small>${slotCounts[i]}</small>`:''}</div>`).join('');$('#selected-name').textContent=itemInfo(slots[selected])?.name??slots[selected];$$('.slot').forEach(s=>s.onclick=()=>{selected=Number(s.dataset.slot);renderHotbar()})}
 function collectBlock(id){
   if(id==='air'||id==='bedrock'||id==='water')return;
   const drop=({grass:'dirt',stone:'cobble',leaves:'air'}[id]??id);
@@ -892,8 +910,8 @@ function renderInventory(query=''){
     const counts=[...storageCounts,...slotCounts];
     $('#itemcount').textContent='持ち物27枠・ホットバー9枠 · 2枠を順に選択して移動';
     $('#items').innerHTML=cells.map((id,i)=>{
-      const item=byId[id]??foodById[id];
-      return `<button class="item-tile inventory-cell ${inventorySelection===i?'inventory-picked':''}" data-index="${i}" aria-label="${i<27?'持ち物':'ホットバー'} ${i<27?i+1:i-26} ${item?.name??'空'} ${counts[i]||0}個"><i style="background:${item?`#${item.color.toString(16).padStart(6,'0')}`:'transparent'}"></i><span>${item?.name??'空'}</span>${id!==AIR&&counts[i]>0?`<small>${counts[i]}</small>`:''}</button>`;
+      const item=itemInfo(id);
+      return `<button class="item-tile inventory-cell ${inventorySelection===i?'inventory-picked':''}" data-index="${i}" aria-label="${i<27?'持ち物':'ホットバー'} ${i<27?i+1:i-26} ${item?.name??'空'} ${counts[i]||0}個"><i style="${item?itemStyle(id):'background:transparent'}"></i><span>${item?.name??'空'}</span>${id!==AIR&&counts[i]>0?`<small>${counts[i]}</small>`:''}</button>`;
     }).join('');
     $$('.inventory-cell').forEach(cell=>cell.onclick=()=>{
       const index=Number(cell.dataset.index);
@@ -919,8 +937,8 @@ function renderInventory(query=''){
     chestPanel.classList.toggle('hidden',!chest);
     if(chest){
       chestPanel.innerHTML=`<h3>チェスト</h3><div class="chest-grid">${chest.items.map((id,i)=>{
-        const item=byId[id]??foodById[id];
-        return `<button class="item-tile chest-cell ${inventorySelection===i+36?'inventory-picked':''}" data-index="${i+36}" aria-label="チェスト ${i+1} ${item?.name??'空'} ${chest.counts[i]}個"><i style="background:${item?`#${item.color.toString(16).padStart(6,'0')}`:'transparent'}"></i><span>${item?.name??'空'}</span>${id!==AIR&&chest.counts[i]>0?`<small>${chest.counts[i]}</small>`:''}</button>`;
+        const item=itemInfo(id);
+        return `<button class="item-tile chest-cell ${inventorySelection===i+36?'inventory-picked':''}" data-index="${i+36}" aria-label="チェスト ${i+1} ${item?.name??'空'} ${chest.counts[i]}個"><i style="${item?itemStyle(id):'background:transparent'}"></i><span>${item?.name??'空'}</span>${id!==AIR&&chest.counts[i]>0?`<small>${chest.counts[i]}</small>`:''}</button>`;
       }).join('')}</div>`;
       $$('.chest-cell').forEach(cell=>cell.onclick=()=>{
         const index=Number(cell.dataset.index);
@@ -945,7 +963,7 @@ function renderInventory(query=''){
     crafting.classList.toggle('hidden',!!chest);
     const result=craftingResult();
     crafting.innerHTML=`<h3>${craftingTableOpen?'3×3 作業台':'2×2 クラフト'}</h3><p>持ち物を選び、マスをタップすると材料を1個置きます。マスをもう一度タップすると戻せます。</p><div class="craft-layout"><div class="craft-grid ${craftingTableOpen?'craft-grid-large':''}">${craftGrid.map((id,i)=>{
-      const item=byId[id]??foodById[id];
+      const item=itemInfo(id);
       return `<button class="craft-cell ${id!==AIR?'filled':''}" data-grid="${i}" aria-label="クラフト ${i+1} ${item?.name??'空'}">${item?.name??'＋'}</button>`;
     }).join('')}</div><span class="craft-arrow">→</span><button id="craft-result" ${result?'':'disabled'}>${result?.name??'完成品'}</button></div>`;
     $$('.craft-cell').forEach(button=>button.onclick=()=>{
@@ -972,9 +990,9 @@ function renderInventory(query=''){
     return;
   }
   $('#crafting').classList.add('hidden');
-  const matches=[...BLOCKS.filter(b=>b.id!=='bedrock'),...FOODS].filter(b=>b.id.includes(query.toLowerCase())||b.name.includes(query));
+  const matches=[...BLOCKS.filter(b=>b.id!=='bedrock'),...FOODS,...ITEMS].filter(b=>b.id.includes(query.toLowerCase())||b.name.includes(query));
   $('#itemcount').textContent=`${matches.length} items · displaying ${Math.min(matches.length,120)}`;
-  $('#items').innerHTML=matches.slice(0,120).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="background:#${b.color.toString(16).padStart(6,'0')}"></i>${b.name}</button>`).join('');
+  $('#items').innerHTML=matches.slice(0,120).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="${itemStyle(b.id)}"></i>${b.name}</button>`).join('');
   $$('.item-tile').forEach(el=>el.onclick=async()=>{
     const id=el.dataset.id;
     slots[selected]=id;
@@ -982,7 +1000,7 @@ function renderInventory(query=''){
     renderHotbar();
     closeInventory();
     scheduleSave();
-    if(!foodById[id])await ensureJavaBlock(id);
+    if(byId[id])await ensureJavaBlock(id);
   });
 }
 function openInventory(useTable=false){
@@ -1089,7 +1107,7 @@ function interact(place){
     }
   }
   if(place&&eatSelectedFood())return;
-  if(place&&foodById[slots[selected]])return;
+  if(place&&!byId[slots[selected]])return;
   const p=hit.point.clone().addScaledVector(normal,place?.025:-.025);
   if(place)p.copy(hit.point).addScaledVector(normal,.025);
   const x=Math.floor(p.x),y=Math.floor(p.y),z=Math.floor(p.z);
@@ -1222,18 +1240,18 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     const tokens=parts[0]==='@s'?parts.slice(1):parts;
     const id=tokens[0]?.replace(/^minecraft:/,'');
     const count=tokens.length===2?Number(tokens[1]):1;
-    if(tokens.length<1||tokens.length>2||!(byId[id]||foodById[id])||!Number.isInteger(count)||count<1||count>2304){
+    if(tokens.length<1||tokens.length>2||!knownItem(id)||!Number.isInteger(count)||count<1||count>2304){
       chat('使用法 /give [@s] block|food [count]（1〜2304）');break;
     }
     if(!addInventoryItem(id,count,true)){chat('インベントリに空きがありません');break}
-    renderHotbar();if(!foodById[id])void ensureJavaBlock(id);
+    renderHotbar();if(byId[id])void ensureJavaBlock(id);
     scheduleSave();chat(`${id} を ${count} 個入手しました`);break;
   }
   case 'clear':{
     const tokens=parts[0]==='@s'?parts.slice(1):parts;
     const id=tokens[0]?.replace(/^minecraft:/,'');
     const maxCount=tokens.length===2?Number(tokens[1]):-1;
-    if(tokens.length>2||(id!==undefined&&!(byId[id]||foodById[id]))||!Number.isInteger(maxCount)||maxCount < -1){
+    if(tokens.length>2||(id!==undefined&&!knownItem(id))||!Number.isInteger(maxCount)||maxCount < -1){
       chat('使用法 /clear [@s] [item] [maxCount]');break;
     }
     let remaining=maxCount===-1?Infinity:maxCount;
@@ -1260,7 +1278,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
       const id=parts[7]?.replace(/^minecraft:/,'');
       const count=parts[8]===undefined?1:Number(parts[8]);
       if(parts.length<8||parts.length>9||!inWorld(coords)||getBlock(...coords)!=='chest'||
-        index<0||index>=27||parts[6]!=='with'||!(byId[id]||foodById[id])||
+        index<0||index>=27||parts[6]!=='with'||!knownItem(id)||
         !Number.isInteger(count)||count<1||count>64){
         chat('使用法 /item replace block x y z container.0 with <item> [1〜64]（チェストのみ）');break;
       }
@@ -1270,7 +1288,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
       chest.counts[index]=count;
       chestContents.set(position,chest);
       if(openChestKey===position)renderInventory();
-      if(!foodById[id])void ensureJavaBlock(id);
+      if(byId[id])void ensureJavaBlock(id);
       scheduleSave();
       chat(`チェスト ${position} の container.${index} に ${id} を ${count} 個設定しました`);
       break;
@@ -1285,13 +1303,13 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     const quantities=inventory?storageCounts:slotCounts;
     if(operation!=='replace'||scope!=='entity'||target!=='@s'||action!=='with'||
       parts.length<6||parts.length>7||index<0||index>=container.length||
-      !(byId[id]||foodById[id])||!Number.isInteger(count)||count<1||count>64){
+      !knownItem(id)||!Number.isInteger(count)||count<1||count>64){
       chat('使用法 /item replace entity @s hotbar.0|inventory.0|weapon.mainhand with <item> [1〜64]');break;
     }
     container[index]=id;
     quantities[index]=count;
     renderHotbar();
-    if(!foodById[id])void ensureJavaBlock(id);
+    if(byId[id])void ensureJavaBlock(id);
     scheduleSave();
     chat(`${slotName} に ${id} を ${count} 個設定しました`);
     break;

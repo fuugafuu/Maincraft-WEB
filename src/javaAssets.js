@@ -80,7 +80,9 @@ export async function loadJavaResources(file, progress = () => {}) {
     filter: entry => entry.name === 'version.json'
       || entry.name.startsWith(prefix + 'blockstates/')
       || entry.name.startsWith(prefix + 'models/block/')
-      || entry.name.startsWith(prefix + 'textures/block/'),
+      || entry.name.startsWith(prefix + 'textures/block/')
+      || entry.name.startsWith(prefix + 'items/')
+      || entry.name.startsWith(prefix + 'textures/item/'),
   });
   const version = archive['version.json'];
   if (!version || JSON.parse(strFromU8(version)).id !== '1.21.11') {
@@ -92,6 +94,21 @@ export async function loadJavaResources(file, progress = () => {}) {
     .map(n => n.slice((prefix + 'blockstates/').length, -5))
     .filter(n => n !== 'air' && n !== 'cave_air' && n !== 'void_air')
     .sort();
+  const itemNames = Object.keys(archive)
+    .filter(n => n.startsWith(prefix + 'items/') && n.endsWith('.json'))
+    .map(n => n.slice((prefix + 'items/').length, -5))
+    .sort();
+  const iconUrls = new Map();
+  function itemIcon(id) {
+    const actual = aliases[id] || id;
+    if (iconUrls.has(actual)) return iconUrls.get(actual);
+    const candidates = [`item/${actual}`, `block/${actual}`, `block/${actual}_top`, `block/${actual}_side`];
+    const path = candidates.find(name => archive[prefix + 'textures/' + name + '.png']);
+    if (!path) return null;
+    const url = URL.createObjectURL(new Blob([archive[prefix + 'textures/' + path + '.png']], {type:'image/png'}));
+    iconUrls.set(actual, url);
+    return url;
+  }
   const modelCache = new Map();
   const resolved = new Map();
   const atlas = document.createElement('canvas');
@@ -268,12 +285,14 @@ export async function loadJavaResources(file, progress = () => {}) {
   return {
     version:'1.21.11',
     blockNames:names,
+    itemNames,
+    itemIcon,
     ensure,
     getModel(id){return resolved.get(aliases[id]||id)},
     addBlock,
     opaqueMaterial,
     glassMaterial,
     textureCount(){return uvSlots.size},
-    dispose(){tex.dispose();opaqueMaterial.dispose();glassMaterial.dispose()},
+    dispose(){for(const url of iconUrls.values())URL.revokeObjectURL(url);tex.dispose();opaqueMaterial.dispose();glassMaterial.dispose()},
   };
 }
