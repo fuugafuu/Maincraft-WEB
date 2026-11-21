@@ -30,6 +30,21 @@ function elementCorners(from, to, side) {
   }
 }
 
+// Java derives omitted UV coordinates from the element dimensions.
+// Several vanilla templates omit them, including cauldrons and hoppers.
+function defaultFaceUV(from, to, side) {
+  const [x,y,z]=from, [X,Y,Z]=to;
+  switch(side) {
+    case 'down': return [x,16-Z,X,16-z];
+    case 'up': return [x,z,X,Z];
+    case 'north': return [16-X,16-Y,16-x,16-y];
+    case 'south': return [x,16-Y,X,16-y];
+    case 'west': return [z,16-Y,Z,16-y];
+    case 'east': return [16-Z,16-Y,16-z,16-y];
+    default: return [0,0,16,16];
+  }
+}
+
 const defaultProperties = {
   north:'false', south:'false', east:'false', west:'false', up:'false', down:'false',
   facing:'south', axis:'y', half:'bottom', type:'bottom', shape:'straight',
@@ -175,6 +190,7 @@ export async function loadJavaResources(file, progress = () => {}) {
   tex.wrapT = THREE.ClampToEdgeWrapping;
   const uvSlots = new Map();
   const pending = new Map();
+  let nextTileIndex = 0;
   const TILE = 32;
   const COLS = atlas.width / TILE;
 
@@ -215,8 +231,10 @@ export async function loadJavaResources(file, progress = () => {}) {
     if (pending.has(path)) return pending.get(path);
     const promise = (async () => {
       const bytes = archive[prefix + 'textures/' + path + '.png'];
-      if (!bytes || uvSlots.size >= COLS * COLS) return null;
-      const index = uvSlots.size;
+      if (!bytes || nextTileIndex >= COLS * COLS) return null;
+      // Reserve the tile before awaiting image decode. Parallel model loads
+      // must never paint separate textures into the same atlas cell.
+      const index = nextTileIndex++;
       const col = index % COLS, row = Math.floor(index / COLS);
       const bitmap = await createImageBitmap(new Blob([bytes], {type:'image/png'}));
       ctx.drawImage(bitmap, col * TILE, row * TILE, TILE, TILE);
@@ -247,7 +265,8 @@ export async function loadJavaResources(file, progress = () => {}) {
         const path = resolveTexture(face.texture, model.textures);
         const tile = path && await sprite(path);
         if (tile) faces[faceName] = {
-          tile, uv:face.uv || [0,0,16,16], cull:!!face.cullface,
+          tile, uv:face.uv || defaultFaceUV(element.from,element.to,faceName),
+          cull:face.cullface||null, uvRotation:face.rotation||0,
           tint: Number.isInteger(face.tintindex),
         };
       }
@@ -295,6 +314,17 @@ export async function loadJavaResources(file, progress = () => {}) {
       return neighbor!=='air'&&neighbor!=='water'
         && !/glass|leaves|ice|slime|honey|torch|flower|grass|vine|fence|pane|wall|stairs|slab/.test(neighbor);
     };
+    const coversWholeFace=(dx,dy,dz)=>{
+      const neighbor=getRawNeighbor(dx,dy,dz);
+      if(neighbor==='air'||neighbor==='water')return false;
+      const name=aliases[neighbor]||neighbor;
+      const adjacentModel=resolved.get(name);
+      if(adjacentModel)return adjacentModel.fullCube&&!adjacentModel.transparent;
+      // Unresolved models are treated conservatively: keep faces visible
+      // unless the neighbor is known to be an opaque cube.
+      return !/glass|ice|leaves|slime|honey|torch|flower|grass|vine|fence|pane|wall|stairs|slab|door|trapdoor|rail|button|pressure_plate|ladder|sign|banner|carpet|snow|candle|chain|lantern|chest|hopper|cauldron|scaffolding|piston_head/.test(name)
+        && /^(stone|dirt|grass_block|sand|sandstone|cobblestone|bedrock|obsidian|oak_log|oak_planks|bricks|netherrack|deepslate|tuff|basalt|end_stone|gravel|clay|mud|.*_ore|.*_planks|.*_log|.*_wood|.*_concrete|.*_terracotta|.*_wool|.*_block)$/.test(name);
+    };
     const vertexShade=(side,corner)=>{
       const face=sides[side].normal;
       const axis=sides[side].axis;
@@ -313,7 +343,13 @@ export async function loadJavaResources(file, progress = () => {}) {
     for (const element of block.elements) {
       if(element.when && !conditionMatches(element.when,properties)) continue;
       for (const [side, face] of Object.entries(element.faces)) {
-        if ((block.fullCube || face.cull) && getNeighbor(...sides[side].normal) !== 'air') continue;
+        if(block.fullCube||face.cull){
+          const cull=new THREE.Vector3(...sides[face.cull||side].normal);
+          if(element.x)cull.applyAxisAngle(new THREE.Vector3(1,0,0),-element.x*Math.PI/180);
+          if(element.y)cull.applyAxisAngle(new THREE.Vector3(0,1,0),-element.y*Math.PI/180);
+          const direction=cull.toArray().map(Math.round);
+          if(coversWholeFace(...direction))continue;
+        }
         const corners = elementCorners(element.from, element.to, side);
         if (!corners) continue;
         const [u0,v0,u1,v1] = face.uv;
@@ -323,6 +359,7 @@ export async function loadJavaResources(file, progress = () => {}) {
         const vTop = 1 - (tile.row * TILE + v0 / 16 * TILE + .1) / atlas.height;
         const vBottom = 1 - (tile.row * TILE + v1 / 16 * TILE - .1) / atlas.height;
         const texCoords = [[uMax,vBottom],[uMax,vTop],[uMin,vTop],[uMin,vBottom]];
+        const uvTurns=((face.uvRotation/90)%4+4)%4;
         const vertices = corners.map(c => {
           const v = new THREE.Vector3(...c);
           if(element.rotation) rotate(v, new THREE.Vector3(
@@ -336,7 +373,7 @@ export async function loadJavaResources(file, progress = () => {}) {
           ? (/leaves/.test(id) ? [.39,.65,.32] : /grass/.test(id) ? [.51,.78,.36] : [.75,.82,.7])
           : [1,1,1];
         for (const index of [0,1,2,0,2,3]) {
-          const v=vertices[index], uv=texCoords[index];
+          const v=vertices[index], uv=texCoords[(index+uvTurns)%4];
           out.pos.push(x+v.x,y+v.y,z+v.z);
           out.uv.push(...uv);
           const brightness=faceBrightness[side]*
