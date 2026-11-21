@@ -561,7 +561,8 @@ function placementProperties(id,normal,hitPoint){
     return {axis};
   }
   if(/_stairs$/.test(id)){
-    const directions=['north','east','south','west'];
+    // Camera yaw 0 looks north (-Z); stairs face back toward their placer.
+    const directions=['south','east','north','west'];
     const facing=directions[((Math.round(yaw/(Math.PI/2))%4)+4)%4];
     const half=normal.y<-.5||(Math.abs(normal.y)<.5&&hitPoint.y-Math.floor(hitPoint.y)>.5)?'top':'bottom';
     return {facing,half,shape:'straight'};
@@ -598,6 +599,7 @@ function rebuild(cx,cz,deferWater=false){
   const prior=loaded.get(chunkKey);
   if(prior){chunkGroup.remove(prior);prior.traverse(o=>o.geometry?.dispose())}
   const group=new THREE.Group();
+  const blockIds=new Set();
   const buffers=new Map();
   const textured=[{pos:[],uv:[],color:[]},{pos:[],uv:[],color:[]}];
   for(let x=cx*CHUNK;x<(cx+1)*CHUNK;x++)
@@ -605,6 +607,7 @@ function rebuild(cx,cz,deferWater=false){
   for(let y=0;y<=Math.max(height(x,z)+9,32,editedChunkHeights.get(chunkKey)??0);y++){
     const id=getBlock(x,y,z);
     if(id===AIR||(id==='water'&&y<=SEA))continue;
+    blockIds.add(id);
     const b=byId[id];
     if(!b)continue;
     const properties=savedStates.get(key(x,y,z))||{};
@@ -665,6 +668,7 @@ function rebuild(cx,cz,deferWater=false){
     }
   }
   loaded.set(chunkKey,group);
+  group.userData.blockIds=blockIds;
   chunkGroup.add(group);
   if(!deferWater)updateWaterSurface();
 }
@@ -925,13 +929,18 @@ function registerItem(id, name=id.replaceAll('_',' ')){
 async function ensureJavaBlock(id,properties={}){
   if(!javaResources)return;
   try{
+    const previous=javaResources.getModel(id,properties);
     const model=await javaResources.ensure(id,properties);
     if(model&&byId[id])byId[id].transparent=model.transparent;
-    if(active&&model){
-      for(const chunk of [...loaded.keys()]){
+    if(active&&model&&model!==previous){
+      let changed=false;
+      for(const [chunk,group] of [...loaded.entries()]){
+        if(!group.userData.blockIds?.has(id))continue;
         const [cx,cz]=chunk.split(',').map(Number);
-        rebuild(cx,cz);
+        rebuild(cx,cz,true);
+        changed=true;
       }
+      if(changed)updateWaterSurface();
     }
   }catch(error){notice(`Model import: ${error.message}`)}
 }
