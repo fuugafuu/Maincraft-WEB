@@ -107,6 +107,12 @@ const blockLighting=createBlockLighting(scene,isTouchDevice);
 const waterSurface=makeWaterMaterial();
 const waterMaterial=waterSurface.material;
 const water=new THREE.Mesh(new THREE.BufferGeometry(),waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=SEA+.14;scene.add(water);
+// Water placed above or below sea level needs its own surface geometry;
+// the planar reflector can only reflect at the fixed sea level.
+const elevatedWater=new THREE.Mesh(new THREE.BufferGeometry(),waterMaterial);
+elevatedWater.rotation.x=-Math.PI/2;
+elevatedWater.position.y=SEA+.14;
+scene.add(elevatedWater);
 // Render the reflected scene at reduced resolution on desktop GPUs.
 // Mobile uses the lightweight physical material to keep touch controls responsive.
 let reflectedWater=null;
@@ -669,24 +675,47 @@ function rebuild(cx,cz){
 }
 function updateWaterSurface(){
   // A surface tile exists only where a water block touches the open air.
-  const positions=[],uvs=[];
+  const positions=[],uvs=[],otherPositions=[],otherUvs=[];
+  const addSurface=(x,y,z)=>{
+    const onSea=y===SEA;
+    const dest=onSea?positions:otherPositions,uv=onSea?uvs:otherUvs;
+    // Placed water is also rendered as a translucent block; draw its surface
+    // just above the top face so both materials do not fight for the same depth.
+    const offset=onSea?0:y-SEA+.88;
+    // Local Z becomes world Y after rotating the mesh around X.
+    dest.push(x,-z,offset,x+1,-z-1,offset,x+1,-z,offset,
+      x,-z,offset,x,-z-1,offset,x+1,-z-1,offset);
+    uv.push(0,0,1,1,1,0,0,0,0,1,1,1);
+  };
   for(const chunk of loaded.keys()){
     const [cx,cz]=chunk.split(',').map(Number);
     for(let x=cx*CHUNK;x<(cx+1)*CHUNK;x++)for(let z=cz*CHUNK;z<(cz+1)*CHUNK;z++){
-      if(getBlock(x,SEA,z)!=='water'||getBlock(x,SEA+1,z)!==AIR)continue;
-      // Water meshes lie in local XY and rotate into world XZ.
-      positions.push(x,-z,0,x+1,-z-1,0,x+1,-z,0,x,-z,0,x,-z-1,0,x+1,-z-1,0);
-      uvs.push(0,0,1,1,1,0,0,0,0,1,1,1);
+      if(getBlock(x,SEA,z)==='water'&&getBlock(x,SEA+1,z)===AIR)addSurface(x,SEA,z);
     }
   }
-  const geometry=new THREE.BufferGeometry();
-  geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
-  geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
-  geometry.computeBoundingSphere();
+  // Only edited water needs an additional scan: generated oceans already use SEA.
+  for(const [position,id] of savedEdits){
+    if(id!=='water')continue;
+    const [x,y,z]=position.split(',').map(Number);
+    if(y===SEA||!loaded.has(`${Math.floor(x/CHUNK)},${Math.floor(z/CHUNK)}`))continue;
+    if(getBlock(x,y+1,z)!==AIR)continue;
+    addSurface(x,y,z);
+  }
+  const makeGeometry=(vertices,texcoords)=>{
+    const geometry=new THREE.BufferGeometry();
+    geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+    geometry.setAttribute('uv',new THREE.Float32BufferAttribute(texcoords,2));
+    geometry.computeBoundingSphere();
+    return geometry;
+  };
+  const geometry=makeGeometry(positions,uvs);
   const old=water.geometry;
   water.geometry=geometry;
   if(reflectedWater)reflectedWater.geometry=geometry;
   old.dispose();
+  const oldElevated=elevatedWater.geometry;
+  elevatedWater.geometry=makeGeometry(otherPositions,otherUvs);
+  oldElevated.dispose();
 }
 function updateChunks(){
   const cx=Math.floor(location.x/CHUNK),cz=Math.floor(location.z/CHUNK);
