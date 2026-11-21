@@ -163,7 +163,7 @@ function updateRain(dt){
   rain.position.set(location.x,location.y,location.z);
   rainGeometry.attributes.position.needsUpdate=true;
 }
-let seed=1,seed64='1',seedString='',worldgenVersion=1,worldName='',mode='creative',savedEdits=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,doDaylightCycle=true,spawnPosition=null;
+let seed=1,seed64='1',seedString='',worldgenVersion=1,worldName='',mode='creative',savedEdits=new Map(),savedStates=new Map(),editedChunkHeights=new Map(),loaded=new Map(),pendingChunks=[],active=false,paused=false,inventoryOpen=false,chatOpen=false,fly=false,timeOfDay=6000,doDaylightCycle=true,spawnPosition=null;
 let slots=['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts=Array(9).fill(64),storageSlots=Array(27).fill(AIR),storageCounts=Array(27).fill(0),inventorySelection=null,craftGrid=Array(4).fill(AIR),craftingTableOpen=false,selected=0,location={x:0,y:23,z:0},vy=0,grounded=false,yaw=0,pitch=0,lastChunkX=Infinity,lastChunkZ=Infinity;
 let chestContents=new Map(),openChestKey=null;
 let playerHealth=20,playerDamageCooldown=0,fallDistance=0;
@@ -543,15 +543,32 @@ function moveVertical(dy){
     location.y+=step;
   }
 }
-function setBlock(x,y,z,id){
+function setBlock(x,y,z,id,properties=null){
   if(y<1||y>100)return;
   writeBlock(x,y,z,id);
+  if(properties&&Object.keys(properties).length)savedStates.set(key(x,y,z),properties);
   blockLighting.invalidate();
   if(id!==AIR)rememberEditHeight(x,y,z);
   for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){
     if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz);
   }
   scheduleSave();
+}
+function placementProperties(id,normal,hitPoint){
+  if(/_(log|wood|stem|hyphae)$/.test(id)||id==='wood'){
+    const axis=Math.abs(normal.x)>.5?'x':Math.abs(normal.z)>.5?'z':'y';
+    return {axis};
+  }
+  if(/_stairs$/.test(id)){
+    const directions=['north','east','south','west'];
+    const facing=directions[((Math.round(yaw/(Math.PI/2))%4)+4)%4];
+    const half=normal.y<-.5||(Math.abs(normal.y)<.5&&hitPoint.y-Math.floor(hitPoint.y)>.5)?'top':'bottom';
+    return {facing,half,shape:'straight'};
+  }
+  if(/_slab$/.test(id)){
+    return {type:normal.y<-.5||(Math.abs(normal.y)<.5&&hitPoint.y-Math.floor(hitPoint.y)>.5)?'top':'bottom'};
+  }
+  return null;
 }
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
 const faces=[{d:[1,0,0],v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]],shade:.8},{d:[-1,0,0],v:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]],shade:.8},{d:[0,1,0],v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]],shade:1.13},{d:[0,-1,0],v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]],shade:.54},{d:[0,0,1],v:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]],shade:.9},{d:[0,0,-1],v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]],shade:.73}];
@@ -589,13 +606,14 @@ function rebuild(cx,cz){
     if(id===AIR||(id==='water'&&y<=SEA))continue;
     const b=byId[id];
     if(!b)continue;
-    const native=javaResources?.getModel(id);
+    const properties=savedStates.get(key(x,y,z))||{};
+    const native=javaResources?.getModel(id,properties);
     if(native?.elements.length){
       const output=textured[Number(native.transparent)];
       javaResources.addBlock(output,native,x,y,z,(dx,dy,dz)=>{
         const neighbor=getBlock(x+dx,y+dy,z+dz);
         return (byId[neighbor]?.transparent)?AIR:neighbor;
-      },id,(dx,dy,dz)=>getBlock(x+dx,y+dy,z+dz));
+      },id,(dx,dy,dz)=>getBlock(x+dx,y+dy,z+dz),properties);
       continue;
     }
     if(!buffers.has(id))buffers.set(id,{pos:[],color:[],normal:[]});
@@ -702,7 +720,7 @@ function readWorldIndex(){
 }
 function saveData(){
   if(!active || !worldId)return;
-  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,difficulty,playerHealth,playerEffects,experienceTotal,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],slots,slotCounts,selected,storageSlots,storageCounts,craftGrid,craftingTableOpen,chestContents:[...chestContents],position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
+  const obj={version:2,worldgenVersion,id:worldId,worldName,seedString,seed,seed64,mode,difficulty,playerHealth,playerEffects,experienceTotal,foodLevel,foodSaturation,foodExhaustion,edits:[...savedEdits],blockStates:[...savedStates],slots,slotCounts,selected,storageSlots,storageCounts,craftGrid,craftingTableOpen,chestContents:[...chestContents],position:location,rotation:{yaw,pitch},spawnPosition,timeOfDay,doDaylightCycle,weather,entities:mobs.save()};
   try {
     localStorage.setItem(WORLD_PREFIX+worldId,JSON.stringify(obj));
     const index=readWorldIndex().filter(item=>item.id!==worldId);
@@ -798,6 +816,11 @@ function validateImportedWorld(data){
   }
   if(data.worldgenVersion!==undefined&&![1,2,3,4,5,6].includes(data.worldgenVersion))return false;
   if(!Array.isArray(data.edits)||data.edits.length>200000)return false;
+  if(data.blockStates!==undefined&&(!Array.isArray(data.blockStates)||data.blockStates.length>200000||
+    !data.blockStates.every(entry=>Array.isArray(entry)&&entry.length===2&&
+      /^-?\d+,-?\d+,-?\d+$/.test(entry[0])&&
+      entry[1]&&typeof entry[1]==='object'&&!Array.isArray(entry[1])&&
+      Object.entries(entry[1]).length<=16&&Object.entries(entry[1]).every(([k,v])=>/^[a-z_]{1,32}$/.test(k)&&/^[a-z0-9_]{1,32}$/.test(v)))))return false;
   if(data.entities!==undefined&&(!Array.isArray(data.entities)||data.entities.length>128||!data.entities.every(entity=>entity&&typeof entity==='object'&&MobWorld.supports(entity.type)&&['x','y','z'].every(axis=>Number.isFinite(entity[axis])))))return false;
   if(!data.edits.every(entry=>Array.isArray(entry)&&entry.length===2&&/^[-]?\d+,[-]?\d+,[-]?\d+$/.test(entry[0])&&typeof entry[1]==='string'&&entry[1].length<=100))return false;
   const position=data.position;
@@ -846,7 +869,7 @@ function lockPointer(){
   const request=renderer.domElement.requestPointerLock?.();
   request?.catch?.(()=>{});
 }
-function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed64=data.seed64??String(data.seed);worldgenVersion=data.worldgenVersion??1;seed=terrainSeed(BigInt(seed64),worldgenVersion);heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;difficulty=DIFFICULTIES.includes(data.difficulty)?data.difficulty:'normal';playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;experienceTotal=Number.isSafeInteger(data.experienceTotal)?Math.max(0,Math.min(1000000000,data.experienceTotal)):0;playerEffects=Object.fromEntries(Object.entries(data.playerEffects??{}).filter(([id,value])=>SUPPORTED_EFFECTS.has(id)&&value.seconds>0));regenerationTimer=0;renderEffects();foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);selected=Number.isInteger(data.selected)&&data.selected>=0&&data.selected<9?data.selected:0;storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;craftingTableOpen=mode==="survival"&&data.craftingTableOpen===true&&Array.isArray(data.craftGrid)&&data.craftGrid.length===9;craftGrid=Array.isArray(data.craftGrid)&&data.craftGrid.length===(craftingTableOpen?9:4)?data.craftGrid.map(id=>typeof id==="string"?id:AIR):Array(4).fill(AIR);inventoryOpen=false;openChestKey=null;chestContents=new Map(Array.isArray(data.chestContents)?data.chestContents:[]);$("#inventory").classList.add("hidden");savedEdits=new Map(data.edits??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);if(difficulty==='peaceful')for(const entity of [...mobs.entities])if(['zombie','creeper'].includes(entity.type))mobs.remove(entity);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
+function newWorld(data){worldId=data.id??crypto.randomUUID();worldName=data.worldName;seedString=data.seedString;seed64=data.seed64??String(data.seed);worldgenVersion=data.worldgenVersion??1;seed=terrainSeed(BigInt(seed64),worldgenVersion);heightCache.clear();biomeCache.clear();structureCache.clear();treeCache.clear();treeColumnCache.clear();mode=data.mode;difficulty=DIFFICULTIES.includes(data.difficulty)?data.difficulty:'normal';playerHealth=Number.isInteger(data.playerHealth)?clamp(data.playerHealth,1,20):20;playerDamageCooldown=0;fallDistance=0;experienceTotal=Number.isSafeInteger(data.experienceTotal)?Math.max(0,Math.min(1000000000,data.experienceTotal)):0;playerEffects=Object.fromEntries(Object.entries(data.playerEffects??{}).filter(([id,value])=>SUPPORTED_EFFECTS.has(id)&&value.seconds>0));regenerationTimer=0;renderEffects();foodLevel=Number.isInteger(data.foodLevel)?clamp(data.foodLevel,0,20):20;foodSaturation=Number.isFinite(data.foodSaturation)?clamp(data.foodSaturation,0,foodLevel):Math.min(5,foodLevel);foodExhaustion=Number.isFinite(data.foodExhaustion)?clamp(data.foodExhaustion,0,4):0;foodTimer=0;updateHealthHud();weather=['clear','rain','thunder'].includes(data.weather)?data.weather:'clear';slots=data.slots??['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'];slotCounts=Array.isArray(data.slotCounts)?[...data.slotCounts]:Array(9).fill(64);selected=Number.isInteger(data.selected)&&data.selected>=0&&data.selected<9?data.selected:0;storageSlots=Array.isArray(data.storageSlots)?[...data.storageSlots]:Array(27).fill(AIR);storageCounts=Array.isArray(data.storageCounts)?[...data.storageCounts]:Array(27).fill(0);inventorySelection=null;craftingTableOpen=mode==="survival"&&data.craftingTableOpen===true&&Array.isArray(data.craftGrid)&&data.craftGrid.length===9;craftGrid=Array.isArray(data.craftGrid)&&data.craftGrid.length===(craftingTableOpen?9:4)?data.craftGrid.map(id=>typeof id==="string"?id:AIR):Array(4).fill(AIR);inventoryOpen=false;openChestKey=null;chestContents=new Map(Array.isArray(data.chestContents)?data.chestContents:[]);$("#inventory").classList.add("hidden");savedEdits=new Map(data.edits??[]);savedStates=new Map(data.blockStates??[]);rebuildEditedChunkHeights();for(const id of savedEdits.values())if(id!==AIR)registerBlock(id);location=data.position??{x:0,y:height(0,0)+3,z:0};spawnPosition=data.spawnPosition??{x:0,y:height(0,0)+3,z:0};timeOfDay=data.timeOfDay??6000;doDaylightCycle=data.doDaylightCycle!==false;mobs.restore(data.entities);if(difficulty==='peaceful')for(const entity of [...mobs.entities])if(['zombie','creeper'].includes(entity.type))mobs.remove(entity);vy=0;fly=mode==='creative';yaw=data.rotation?.yaw??0;pitch=data.rotation?.pitch??0;camera.rotation.order='YXZ';loaded.forEach(g=>{chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose())});loaded.clear();pendingChunks=[];lastChunkX=Infinity;lastChunkZ=Infinity;active=true;paused=false;$('#menu').classList.add('hidden');$('#worldlist').classList.add('hidden');$('#hud').classList.remove('hidden');$('#pause').classList.add('hidden');$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>地形を生成中… · Seed ${seed64}`;updateChunks();renderHotbar();updateSun();notice(`ワールド「${worldName}」 · シード ${seed64}`);saveData();if(data.migrateLegacy&&localStorage.getItem(WORLD_PREFIX+worldId))localStorage.removeItem('maincraft.world');lockPointer()}
 $('#create').onclick=()=>{const seedString=$('#seed').value.trim();const longSeed=stringSeed(seedString);const seed=Number(BigInt.asIntN(32,longSeed));const survival=$('#mode').value==='survival';newWorld({worldName:$('#worldname').value.trim()||'新しいワールド',seedString:seedString||String(longSeed),seed64:String(longSeed),worldgenVersion:6,seed:terrainSeed(longSeed,6),mode:$('#mode').value,edits:[],slots:survival?Array(9).fill(AIR):['grass','dirt','stone','wood','planks','glass','bricks','leaves','water'],slotCounts:Array(9).fill(survival?0:64)})};
 $('#resume').onclick=showWorlds;
 function registerBlock(id, name=id.replaceAll('_',' ')){
@@ -865,10 +888,10 @@ function registerItem(id, name=id.replaceAll('_',' ')){
   ITEMS.push(item);
   itemById[id]=item;
 }
-async function ensureJavaBlock(id){
+async function ensureJavaBlock(id,properties={}){
   if(!javaResources)return;
   try{
-    const model=await javaResources.ensure(id);
+    const model=await javaResources.ensure(id,properties);
     if(model&&byId[id])byId[id].transparent=model.transparent;
     if(active&&model){
       for(const chunk of [...loaded.keys()]){
@@ -911,6 +934,10 @@ async function importJavaJar(file,persist=true){
     }
     for(const id of new Set([...savedEdits.values()])){
       if(id!=='air')await javaResources.ensure(id);
+    }
+    for(const [position,properties] of savedStates){
+      const id=savedEdits.get(position)||getBlock(...position.split(',').map(Number));
+      if(id!==AIR)await javaResources.ensure(id,properties);
     }
     old?.dispose();
     if(active||titlePreviewReady)for(const chunk of [...loaded.keys()]){
@@ -1384,7 +1411,9 @@ function interact(place){
     const id=slots[selected];
     if(!byId[id]||id===AIR||id==='bedrock'||(mode==='survival'&&slotCounts[selected]===0))return;
     if(getBlock(x,y,z)!==AIR&&getBlock(x,y,z)!=='water')return;
-    setBlock(x,y,z,id);
+    const properties=placementProperties(id,normal,hit.point);
+    setBlock(x,y,z,id,properties);
+    if(properties)void ensureJavaBlock(id,properties);
     if(mode==='survival'){
       slotCounts[selected]--;
       if(slotCounts[selected]===0)slots[selected]=AIR;
@@ -1430,6 +1459,7 @@ function updateBlockRegion(positions){
 }
 function writeBlock(x,y,z,id){
   const position=key(x,y,z);
+  savedStates.delete(position);
   if(getBlock(x,y,z)==='chest'&&id!=='chest')chestContents.delete(position);
   if(id===generatedBlock(x,y,z))savedEdits.delete(position);
   else savedEdits.set(position,id);
@@ -1477,7 +1507,24 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
   }
   case 'seed':chat(`シード: ${seed64}`);break;
   case 'tp':case 'teleport':{const p=xyz();if(!valid(p)){chat('使用法 /tp x y z');break}location={x:p[0],y:p[1],z:p[2]};vy=0;fallDistance=0;grounded=false;updateChunks();chat('テレポートしました');break}
-  case 'setblock':{const p=xyz(),id=parts[3]?.replace('minecraft:',''),action=parts[4]||'replace';if(!inWorld(p)||!(id===AIR||byId[id])||!['keep','replace','destroy'].includes(action)){chat('使用法 /setblock x y z block [keep|replace|destroy]');break}if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}setBlock(...p,id);if(id!==AIR)void ensureJavaBlock(id);chat(`ブロックを設置しました ${id}`);break}
+  case 'setblock':{
+    const p=xyz(),spec=parts[3]?.replace(/^minecraft:/,''),action=parts[4]||'replace';
+    const match=spec?.match(/^([a-z0-9_]+)(?:\[([a-z_]+=[a-z0-9_]+(?:,[a-z_]+=[a-z0-9_]+)*)\])?$/);
+    const id=match?.[1];
+    const properties={};
+    if(match?.[2])for(const entry of match[2].split(',')){
+      const [name,value]=entry.split('=');
+      properties[name]=value;
+    }
+    const supported=Object.keys(properties).every(name=>['axis','facing','half','type','shape'].includes(name));
+    if(!inWorld(p)||!(id===AIR||byId[id])||!supported||!['keep','replace','destroy'].includes(action)){
+      chat('使用法 /setblock x y z block[axis=x|y|z,facing=north|south|east|west] [keep|replace|destroy]');break;
+    }
+    if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}
+    setBlock(...p,id,properties);
+    if(id!==AIR)void ensureJavaBlock(id,properties);
+    chat(`ブロックを設置しました ${spec}`);break;
+  }
   case 'fill':{
     const a=xyz(),b=xyz(3),id=parts[6]?.replace(/^minecraft:/,''),action=parts[7]||'replace';
     const filter=parts[8]?.replace(/^minecraft:/,'');
@@ -1520,27 +1567,31 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
       const id=getBlock(sourceX,sourceY,sourceZ);
       if(mask==='masked'&&id===AIR)continue;
       if(mask==='filtered'&&id!==filter)continue;
-      const chest=id==='chest'?chestContents.get(key(sourceX,sourceY,sourceZ)):null;
-      source.push([sourceX,sourceY,sourceZ,dest[0]+dx,dest[1]+dy,dest[2]+dz,id,chest?{items:[...chest.items],counts:[...chest.counts]}:null]);
+      const sourceKey=key(sourceX,sourceY,sourceZ);
+      const chest=id==='chest'?chestContents.get(sourceKey):null;
+      const properties=savedStates.get(sourceKey);
+      source.push([sourceX,sourceY,sourceZ,dest[0]+dx,dest[1]+dy,dest[2]+dz,id,chest?{items:[...chest.items],counts:[...chest.counts]}:null,properties?{...properties}:null]);
     }
     const changed=[],usedBlocks=new Set();
     if(cloneMode==='move')for(const [x,y,z] of source){
       writeBlock(x,y,z,AIR);
       changed.push([x,y,z]);
     }
-    for(const [, , ,x,y,z,id,chest] of source){
+    for(const [, , ,x,y,z,id,chest,properties] of source){
       const destinationKey=key(x,y,z);
-      if(getBlock(x,y,z)===id&&id!=='chest')continue;
+      const previousProperties=savedStates.get(destinationKey)||null;
+      if(getBlock(x,y,z)===id&&id!=='chest'&&JSON.stringify(previousProperties)===JSON.stringify(properties))continue;
       writeBlock(x,y,z,id);
+      if(properties)savedStates.set(destinationKey,properties);
       if(id==='chest'){
         if(chest)chestContents.set(destinationKey,chest);
         else chestContents.delete(destinationKey);
       }
       changed.push([x,y,z]);
-      if(id!==AIR)usedBlocks.add(id);
+      if(id!==AIR)usedBlocks.add(JSON.stringify([id,properties||{}]));
     }
     updateBlockRegion(changed);
-    for(const id of usedBlocks)void ensureJavaBlock(id);
+    for(const block of usedBlocks){const [id,properties]=JSON.parse(block);void ensureJavaBlock(id,properties)}
     chat(`${changed.length} ブロックを複製しました`);break;
   }
   case 'give':{

@@ -62,16 +62,16 @@ function conditionMatches(condition, properties) {
   });
 }
 
-function chooseVariants(state, id) {
+function chooseVariants(state, id, overrides = {}) {
   const properties=id==='redstone_wire'
-    ? {...defaultProperties,north:'none',south:'none',east:'none',west:'none'}
-    : defaultProperties;
+    ? {...defaultProperties,north:'none',south:'none',east:'none',west:'none',...overrides}
+    : {...defaultProperties,...overrides};
   if(state.variants) {
     const entries = Object.entries(state.variants);
     const preferred = entries.find(([settings]) =>
       !settings || settings.split(',').every(pair => {
         const [name, value]=pair.split('=');
-        return (properties[name] ?? value) === value;
+        return properties[name] === value;
       }));
     const variant = (preferred || entries[0])?.[1];
     return variant ? [Array.isArray(variant) ? variant[0] : variant] : [];
@@ -249,11 +249,17 @@ export async function loadJavaResources(file, progress = () => {}) {
     finally { pending.delete(path); }
   }
 
-  async function ensure(id) {
+  const variantKey=(id,properties)=> {
+    const name=aliases[id]||id;
+    const pairs=Object.entries(properties||{}).sort(([a],[b])=>a.localeCompare(b));
+    return pairs.length?name+'['+pairs.map(([k,v])=>k+'='+v).join(',')+']':name;
+  };
+  async function ensure(id,properties={}) {
     const actual = aliases[id] || id;
-    if (resolved.has(actual)) return resolved.get(actual);
+    const cacheKey=variantKey(id,properties);
+    if (resolved.has(cacheKey)) return resolved.get(cacheKey);
     const state = readJson(prefix + 'blockstates/' + actual + '.json');
-    const variants = state ? chooseVariants(state, actual) : [];
+    const variants = state ? chooseVariants(state, actual, properties) : [];
     const definitions = [];
     for (const variant of variants) {
       const model=loadModel(variant.model);
@@ -283,12 +289,12 @@ export async function loadJavaResources(file, progress = () => {}) {
       && !definitions[0].rotation;
     const transparent = /glass|ice|water|leaves|slime|honey|pane|grate|bars/.test(actual);
     const result = {elements:definitions, fullCube, transparent, multipart:!!state?.multipart};
-    resolved.set(actual,result);
+    resolved.set(cacheKey,result);
     return result;
   }
 
-  function addBlock(out, block, x, y, z, getNeighbor, id, getRawNeighbor = getNeighbor) {
-    const properties = {...defaultProperties};
+  function addBlock(out, block, x, y, z, getNeighbor, id, getRawNeighbor = getNeighbor, stateProperties = {}) {
+    const properties = {...defaultProperties,...stateProperties};
     if(id === 'redstone_wire') {
       for(const direction of ['north','south','east','west']) properties[direction]='none';
     }
@@ -400,7 +406,7 @@ export async function loadJavaResources(file, progress = () => {}) {
     itemIcon,
     guiIcon,
     ensure,
-    getModel(id){return resolved.get(aliases[id]||id)},
+    getModel(id,properties={}){return resolved.get(variantKey(id,properties))||resolved.get(aliases[id]||id)},
     addBlock,
     opaqueMaterial,
     glassMaterial,
