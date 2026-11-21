@@ -288,7 +288,11 @@ export async function loadJavaResources(file, progress = () => {}) {
       && definitions[0].to.every(v => v === 16)
       && !definitions[0].rotation;
     const transparent = /glass|ice|water|leaves|slime|honey|pane|grate|bars/.test(actual);
-    const result = {elements:definitions, fullCube, transparent, multipart:!!state?.multipart};
+    // Vanilla foliage uses alpha testing with depth writes, unlike glass.
+    // An alpha blended material makes leaf canopies look like translucent glass.
+    const cutout = /leaves|sapling|flower|grass|fern|bush|vine|roots|mushroom|torch|lantern|rail|ladder|crops|wheat|carrots|potatoes|beetroot|sign|door|trapdoor|cobweb|coral|seagrass|sugar_cane|bamboo|cactus_flower|azalea|lily_pad|kelp/.test(actual)
+      && !/glass|ice|slime|honey/.test(actual);
+    const result = {elements:definitions, fullCube, transparent, renderLayer:cutout?1:transparent?2:0, multipart:!!state?.multipart};
     resolved.set(cacheKey,result);
     return result;
   }
@@ -393,6 +397,10 @@ export async function loadJavaResources(file, progress = () => {}) {
   const opaqueMaterial = new THREE.MeshStandardMaterial({
     map:tex, vertexColors:true, side:THREE.DoubleSide, transparent:false, alphaTest:.12, roughness:1, metalness:0,
   });
+  const cutoutMaterial = new THREE.MeshStandardMaterial({
+    map:tex, vertexColors:true, side:THREE.DoubleSide, transparent:false, alphaTest:.5,
+    depthWrite:true, roughness:1, metalness:0,
+  });
   const glassMaterial = new THREE.MeshPhysicalMaterial({
     map:tex, vertexColors:true, side:THREE.DoubleSide, transparent:true, opacity:.78, depthWrite:false,
     roughness:.14, metalness:0, clearcoat:.65,
@@ -409,8 +417,9 @@ export async function loadJavaResources(file, progress = () => {}) {
     getModel(id,properties={}){return resolved.get(variantKey(id,properties))||resolved.get(aliases[id]||id)},
     addBlock,
     opaqueMaterial,
+    cutoutMaterial,
     glassMaterial,
     textureCount(){return uvSlots.size},
-    dispose(){for(const url of iconUrls.values())URL.revokeObjectURL(url);tex.dispose();opaqueMaterial.dispose();glassMaterial.dispose()},
+    dispose(){for(const url of iconUrls.values())URL.revokeObjectURL(url);tex.dispose();opaqueMaterial.dispose();cutoutMaterial.dispose();glassMaterial.dispose()},
   };
 }

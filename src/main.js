@@ -601,7 +601,7 @@ function rebuild(cx,cz,deferWater=false){
   const group=new THREE.Group();
   const blockIds=new Set();
   const buffers=new Map();
-  const textured=[{pos:[],uv:[],color:[]},{pos:[],uv:[],color:[]}];
+  const textured=[{pos:[],uv:[],color:[]},{pos:[],uv:[],color:[]},{pos:[],uv:[],color:[]}];
   for(let x=cx*CHUNK;x<(cx+1)*CHUNK;x++)
   for(let z=cz*CHUNK;z<(cz+1)*CHUNK;z++)
   for(let y=0;y<=Math.max(height(x,z)+9,32,editedChunkHeights.get(chunkKey)??0);y++){
@@ -613,7 +613,7 @@ function rebuild(cx,cz,deferWater=false){
     const properties=savedStates.get(key(x,y,z))||{};
     const native=javaResources?.getModel(id,properties);
     if(native?.elements.length){
-      const output=textured[Number(native.transparent)];
+      const output=textured[native.renderLayer??Number(native.transparent)];
       javaResources.addBlock(output,native,x,y,z,(dx,dy,dz)=>{
         const neighbor=getBlock(x+dx,y+dy,z+dz);
         return (byId[neighbor]?.transparent)?AIR:neighbor;
@@ -655,7 +655,7 @@ function rebuild(cx,cz,deferWater=false){
     group.add(mesh);
   }
   if(javaResources){
-    for(let i=0;i<2;i++){
+    for(let i=0;i<textured.length;i++){
       const buf=textured[i];
       if(!buf.pos.length)continue;
       const geometry=new THREE.BufferGeometry();
@@ -664,9 +664,9 @@ function rebuild(cx,cz,deferWater=false){
       geometry.setAttribute('color',new THREE.Float32BufferAttribute(buf.color,3));
       geometry.computeVertexNormals();
       geometry.computeBoundingSphere();
-      const mesh=new THREE.Mesh(geometry,i?javaResources.glassMaterial:javaResources.opaqueMaterial);
+      const mesh=new THREE.Mesh(geometry,[javaResources.opaqueMaterial,javaResources.cutoutMaterial,javaResources.glassMaterial][i]);
       mesh.receiveShadow=true;
-      mesh.castShadow=!i;
+      mesh.castShadow=i!==2;
       group.add(mesh);
     }
   }
