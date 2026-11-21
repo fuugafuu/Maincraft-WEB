@@ -300,7 +300,24 @@ export async function loadJavaResources(file, progress = () => {}) {
   function addBlock(out, block, x, y, z, getNeighbor, id, getRawNeighbor = getNeighbor, stateProperties = {}) {
     const properties = {...defaultProperties,...stateProperties};
     if(id === 'redstone_wire') {
-      for(const direction of ['north','south','east','west']) properties[direction]='none';
+      const offsets={north:[0,0,-1],south:[0,0,1],east:[1,0,0],west:[-1,0,0]};
+      const connectsTo=neighbor=>neighbor==='redstone_wire'||neighbor==='redstone_block'
+        || /^(repeater|comparator|lever|observer|redstone_torch|redstone_wall_torch|target|tripwire_hook)$/.test(neighbor);
+      for(const [direction,[dx,,dz]] of Object.entries(offsets)) {
+        if(Object.hasOwn(stateProperties,direction))continue;
+        const adjacent=getRawNeighbor(dx,0,dz);
+        const above=getRawNeighbor(dx,1,dz);
+        const below=getRawNeighbor(dx,-1,dz);
+        const openAbove=getRawNeighbor(0,1,0)==='air';
+        properties[direction]=connectsTo(adjacent)?'side'
+          :openAbove&&above==='redstone_wire'&&adjacent!=='air'?'up'
+          :below==='redstone_wire'&&adjacent==='air'?'side':'none';
+      }
+      const connected=Object.entries(offsets).filter(([direction])=>properties[direction]!=='none');
+      if(connected.length===1){
+        const opposite={north:'south',south:'north',east:'west',west:'east'}[connected[0][0]];
+        if(properties[opposite]==='none')properties[opposite]='side';
+      }
     }
     if(/_fence$|_wall$|_pane$/.test(id) || id === 'iron_bars') {
       const offsets = {north:[0,0,-1], south:[0,0,1], east:[1,0,0], west:[-1,0,0]};
