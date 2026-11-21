@@ -84,7 +84,9 @@ function chooseVariants(state, id, overrides = {}) {
     );
     const variant=pool.reduce((best,candidate)=>
       !best||score(candidate)>score(best)?candidate:best,null)?.value;
-    return variant ? [Array.isArray(variant) ? variant[0] : variant] : [];
+    return variant ? (Array.isArray(variant)
+      ? variant.map((choice,index)=>({...choice,choice:index}))
+      : [variant]) : [];
   }
   if(state.multipart) {
     return state.multipart.map(part => ({
@@ -328,27 +330,39 @@ export async function loadJavaResources(file, progress = () => {}) {
       }
       if (Object.keys(faces).length) definitions.push({
         from: element.from, to: element.to, faces, rotation:element.rotation,
-        x:variant.x||0, y:variant.y||0, when:variant.when,
+        x:variant.x||0, y:variant.y||0, when:variant.when, choice:variant.choice,
       });
       }
     }
     if(!definitions.length)return null;
-    const fullCube = definitions.length === 1
-      && definitions[0].from.every(v => v === 0)
-      && definitions[0].to.every(v => v === 16)
-      && !definitions[0].rotation;
+    const fullCube = definitions.every(element=>element.from.every(v=>v===0)
+      && element.to.every(v=>v===16)&&!element.rotation);
     const transparent = /glass|ice|water|leaves|slime|honey|pane|grate|bars/.test(actual);
     // Vanilla foliage uses alpha testing with depth writes, unlike glass.
     // An alpha blended material makes leaf canopies look like translucent glass.
     const cutout = /leaves|sapling|flower|grass|fern|bush|vine|roots|mushroom|torch|lantern|rail|ladder|crops|wheat|carrots|potatoes|beetroot|sign|door|trapdoor|cobweb|coral|seagrass|sugar_cane|bamboo|cactus_flower|azalea|lily_pad|kelp/.test(actual)
       && !/glass|ice|slime|honey/.test(actual);
-    const result = {elements:definitions, fullCube, transparent, renderLayer:cutout?1:transparent?2:0, multipart:!!state?.multipart};
+    const weights=variants.some(variant=>variant.choice!==undefined)
+      ? variants.map(variant=>Math.max(1,Number(variant.weight)||1)) : null;
+    const result = {elements:definitions, fullCube, transparent, renderLayer:cutout?1:transparent?2:0, multipart:!!state?.multipart, weights};
     resolved.set(cacheKey,result);
     return result;
   }
 
   function addBlock(out, block, x, y, z, getNeighbor, id, getRawNeighbor = getNeighbor, stateProperties = {}) {
     const properties = {...defaultProperties,...stateProperties};
+    let choice=0;
+    if(block.weights?.length>1){
+      const total=block.weights.reduce((sum,weight)=>sum+weight,0);
+      let random=(Math.imul(x,73428767)^Math.imul(y,912931)^Math.imul(z,19349663))|0;
+      random=Math.imul(random^(random>>>16),0x7feb352d);
+      random=Math.imul(random^(random>>>15),0x846ca68b);
+      let selected=((random^(random>>>16))>>>0)%total;
+      for(let i=0;i<block.weights.length;i++){
+        selected-=block.weights[i];
+        if(selected<0){choice=i;break;}
+      }
+    }
     if(id === 'redstone_wire') {
       const offsets={north:[0,0,-1],south:[0,0,1],east:[1,0,0],west:[-1,0,0]};
       const connectsTo=neighbor=>neighbor==='redstone_wire'||neighbor==='redstone_block'
@@ -418,6 +432,7 @@ export async function loadJavaResources(file, progress = () => {}) {
     };
     const faceBrightness={up:1,down:.55,north:.8,south:.8,east:.65,west:.65};
     for (const element of block.elements) {
+      if(element.choice!==undefined&&element.choice!==choice)continue;
       if(element.when && !conditionMatches(element.when,properties)) continue;
       for (const [side, face] of Object.entries(element.faces)) {
         if(block.fullCube||face.cull){
