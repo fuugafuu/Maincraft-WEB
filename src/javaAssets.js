@@ -201,6 +201,46 @@ export async function loadJavaResources(file, progress = () => {}) {
     catch { return null; }
   }
 
+  const blockPropertyCache = new Map();
+  function blockProperties(id) {
+    const actual=aliases[id]||id;
+    if(blockPropertyCache.has(actual))return blockPropertyCache.get(actual);
+    const state=readJson(prefix+'blockstates/'+actual+'.json');
+    if(!state)return null;
+    const options=new Map();
+    const record=(name,value)=>{
+      if(!options.has(name))options.set(name,new Set());
+      for(const choice of String(value).split('|'))options.get(name).add(choice);
+    };
+    for(const variant of Object.keys(state.variants||{})){
+      if(!variant)continue;
+      for(const pair of variant.split(',')){
+        const separator=pair.indexOf('=');
+        if(separator>0)record(pair.slice(0,separator),pair.slice(separator+1));
+      }
+    }
+    const collectWhen=condition=>{
+      if(!condition||typeof condition!=='object')return;
+      for(const [name,value] of Object.entries(condition)){
+        if(name==='OR'||name==='AND'){
+          if(Array.isArray(value))value.forEach(collectWhen);
+        }else if(typeof value==='string'||typeof value==='number'||typeof value==='boolean')record(name,value);
+      }
+    };
+    for(const part of state.multipart||[])collectWhen(part.when);
+    // Java blockstate model JSON omits properties which do not affect the model.
+    // Redstone power controls simulation and tint, but not the wire geometry.
+    if(actual==='redstone_wire')for(let power=0;power<=15;power++)record('power',power);
+    blockPropertyCache.set(actual,options);
+    return options;
+  }
+
+  function validBlockProperties(id,properties={}) {
+    const allowed=blockProperties(id);
+    if(!allowed)return false;
+    return Object.entries(properties).every(([name,value])=>allowed.get(name)?.has(String(value)));
+  }
+
   function loadModel(name, trail = new Set()) {
     if (!name) return null;
     const id = name.replace(/^minecraft:/, '').replace(/^block\//, '');
@@ -432,6 +472,7 @@ export async function loadJavaResources(file, progress = () => {}) {
     guiIcon,
     ensure,
     getModel(id,properties={}){return resolved.get(variantKey(id,properties))||resolved.get(aliases[id]||id)},
+    validBlockProperties,
     addBlock,
     opaqueMaterial,
     cutoutMaterial,

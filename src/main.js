@@ -1565,9 +1565,17 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
       const [name,value]=entry.split('=');
       properties[name]=value;
     }
-    const supported=Object.keys(properties).every(name=>['axis','facing','half','type','shape'].includes(name));
+    const supported=javaResources
+      ? (id===AIR?Object.keys(properties).length===0:javaResources.validBlockProperties(id,properties))
+      : Object.entries(properties).every(([name,value])=>({
+          axis:['x','y','z'], facing:['north','south','east','west','up','down'],
+          half:['top','bottom','upper','lower'], type:['top','bottom','double'],
+          shape:['straight','inner_left','inner_right','outer_left','outer_right'],
+          lit:['true','false'], powered:['true','false'], open:['true','false'],
+          waterlogged:['true','false'], hinge:['left','right'],
+        }[name]||[]).includes(value));
     if(!inWorld(p)||!(id===AIR||byId[id])||!supported||!['keep','replace','destroy'].includes(action)){
-      chat('使用法 /setblock x y z block[axis=x|y|z,facing=north|south|east|west] [keep|replace|destroy]');break;
+      chat('使用法 /setblock x y z block[property=value,...] [keep|replace|destroy]');break;
     }
     if(action==='keep'&&getBlock(...p)!==AIR){chat('変更対象が空気ではありません');break}
     setBlock(...p,id,properties);
