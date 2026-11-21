@@ -555,6 +555,25 @@ function setBlock(x,y,z,id){
 }
 // Each visible block face is added directly to a chunk mesh, keeping draw calls low.
 const faces=[{d:[1,0,0],v:[[1,0,0],[1,1,0],[1,1,1],[1,0,1]],shade:.8},{d:[-1,0,0],v:[[0,0,1],[0,1,1],[0,1,0],[0,0,0]],shade:.8},{d:[0,1,0],v:[[0,1,1],[1,1,1],[1,1,0],[0,1,0]],shade:1.13},{d:[0,-1,0],v:[[0,0,0],[1,0,0],[1,0,1],[0,0,1]],shade:.54},{d:[0,0,1],v:[[1,0,1],[1,1,1],[0,1,1],[0,0,1]],shade:.9},{d:[0,0,-1],v:[[0,0,0],[0,1,0],[1,1,0],[1,0,0]],shade:.73}];
+// Minecraft-style smooth ambient occlusion: count the two edge neighbors and
+// the diagonal neighbor immediately outside each face corner.
+function blockCornerLight(x,y,z,normal,vertex){
+  const axis=normal.findIndex(value=>value!==0);
+  const tangents=[0,1,2].filter(i=>i!==axis);
+  const edgeA=[...normal],edgeB=[...normal],corner=[...normal];
+  for(const [index,tangent] of tangents.entries()){
+    const side=vertex[tangent]===0?-1:1;
+    (index===0?edgeA:edgeB)[tangent]=side;
+    corner[tangent]=side;
+  }
+  const opaque=offset=>{
+    const id=getBlock(x+offset[0],y+offset[1],z+offset[2]);
+    return id!==AIR&&id!=='water'&&!byId[id]?.transparent&&isSolid(id);
+  };
+  const a=opaque(edgeA),b=opaque(edgeB),diagonal=opaque(corner);
+  const occlusion=a&&b?3:Number(a)+Number(b)+Number(diagonal);
+  return 1-occlusion*.17;
+}
 const materials={};for(const b of BLOCKS)materials[b.id]=makeTerrainMaterial({vertexColors:true,side:b.transparent?THREE.DoubleSide:THREE.FrontSide,transparent:!!b.transparent,opacity:b.transparent?.72:1,depthWrite:!b.transparent});
 function rebuild(cx,cz){
   const chunkKey=`${cx},${cz}`;
@@ -587,11 +606,13 @@ function rebuild(cx,cz){
       if(adjacent!==AIR && !(byId[adjacent]?.transparent&&!b.transparent))continue;
       const rgb=new THREE.Color(fi===2?(b.top??b.color):(fi===0||fi===1||fi===4||fi===5?(b.side??b.color):b.color));
       rgb.multiplyScalar(f.shade*(.91+hash(x+fi,z+y)*.15));
+      const cornerLight=b.transparent?null:f.v.map(v=>blockCornerLight(x,y,z,f.d,v));
       for(const n of [0,1,2,0,2,3]){
         const v=f.v[n];
         out.pos.push(x+v[0],y+v[1],z+v[2]);
         out.normal.push(...f.d);
-        out.color.push(rgb.r,rgb.g,rgb.b);
+        const ao=cornerLight?.[n]??1;
+        out.color.push(rgb.r*ao,rgb.g*ao,rgb.b*ao);
       }
     }
   }

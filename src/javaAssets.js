@@ -290,6 +290,26 @@ export async function loadJavaResources(file, progress = () => {}) {
       const pivot = new THREE.Vector3(...origin.map(n => n / 16));
       v.sub(pivot).applyAxisAngle(axis, angle * Math.PI / 180).add(pivot);
     };
+    const isOccluder=(dx,dy,dz)=>{
+      const neighbor=getRawNeighbor(dx,dy,dz);
+      return neighbor!=='air'&&neighbor!=='water'
+        && !/glass|leaves|ice|slime|honey|torch|flower|grass|vine|fence|pane|wall|stairs|slab/.test(neighbor);
+    };
+    const vertexShade=(side,corner)=>{
+      const face=sides[side].normal;
+      const axis=sides[side].axis;
+      const axes=[0,1,2].filter(i=>i!==axis);
+      const first=[...face],second=[...face],diagonal=[...face];
+      for(const [index,i] of axes.entries()){
+        const sign=corner[i]<.5?-1:1;
+        (index===0?first:second)[i]=sign;
+        diagonal[i]=sign;
+      }
+      const a=isOccluder(...first),b=isOccluder(...second);
+      const blocked=a&&b?3:Number(a)+Number(b)+Number(isOccluder(...diagonal));
+      return 1-blocked*.17;
+    };
+    const faceBrightness={up:1,down:.55,north:.8,south:.8,east:.65,west:.65};
     for (const element of block.elements) {
       if(element.when && !conditionMatches(element.when,properties)) continue;
       for (const [side, face] of Object.entries(element.faces)) {
@@ -319,7 +339,9 @@ export async function loadJavaResources(file, progress = () => {}) {
           const v=vertices[index], uv=texCoords[index];
           out.pos.push(x+v.x,y+v.y,z+v.z);
           out.uv.push(...uv);
-          out.color.push(...tint);
+          const brightness=faceBrightness[side]*
+            (block.fullCube&&!block.transparent?vertexShade(side,corners[index]):1);
+          out.color.push(...tint.map(channel=>channel*brightness));
         }
       }
     }
