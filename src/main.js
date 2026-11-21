@@ -625,7 +625,10 @@ function rebuild(cx,cz,deferWater=false){
     for(let fi=0;fi<6;fi++){
       const f=faces[fi];
       const adjacent=getBlock(x+f.d[0],y+f.d[1],z+f.d[2]);
-      if(adjacent!==AIR && !(byId[adjacent]?.transparent&&!b.transparent))continue;
+      // Different translucent blocks must keep their shared boundary visible.
+      // Hide internal faces only between identical translucent blocks or
+      // where the neighbour is opaque.
+      if(adjacent!==AIR && !(byId[adjacent]?.transparent&&(!b.transparent||adjacent!==id)))continue;
       const rgb=new THREE.Color(fi===2?(b.top??b.color):(fi===0||fi===1||fi===4||fi===5?(b.side??b.color):b.color));
       rgb.multiplyScalar(f.shade*(.91+hash(x+fi,z+y)*.15));
       const cornerLight=b.transparent?null:f.v.map(v=>blockCornerLight(x,y,z,f.d,v));
