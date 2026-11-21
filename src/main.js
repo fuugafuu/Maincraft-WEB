@@ -553,12 +553,7 @@ function setBlock(x,y,z,id,properties=null){
   if(y<1||y>100)return;
   writeBlock(x,y,z,id);
   if(properties&&Object.keys(properties).length)savedStates.set(key(x,y,z),properties);
-  blockLighting.invalidate();
-  if(id!==AIR)rememberEditHeight(x,y,z);
-  for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){
-    if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz);
-  }
-  scheduleSave();
+  updateBlockRegion([[x,y,z]]);
 }
 function placementProperties(id,normal,hitPoint){
   if(/_(log|wood|stem|hyphae)$/.test(id)||id==='wood'){
@@ -598,7 +593,7 @@ function blockCornerLight(x,y,z,normal,vertex){
   return 1-occlusion*.17;
 }
 const materials={};for(const b of BLOCKS)materials[b.id]=makeTerrainMaterial({vertexColors:true,side:b.transparent?THREE.DoubleSide:THREE.FrontSide,transparent:!!b.transparent,opacity:b.transparent?.72:1,depthWrite:!b.transparent});
-function rebuild(cx,cz){
+function rebuild(cx,cz,deferWater=false){
   const chunkKey=`${cx},${cz}`;
   const prior=loaded.get(chunkKey);
   if(prior){chunkGroup.remove(prior);prior.traverse(o=>o.geometry?.dispose())}
@@ -671,7 +666,7 @@ function rebuild(cx,cz){
   }
   loaded.set(chunkKey,group);
   chunkGroup.add(group);
-  updateWaterSurface();
+  if(!deferWater)updateWaterSurface();
 }
 function updateWaterSurface(){
   // A surface tile exists only where a water block touches the open air.
@@ -1472,18 +1467,21 @@ function updateBlockRegion(positions){
   const chunks=new Set();
   for(const [x,,z] of positions){
     const cx=Math.floor(x/CHUNK),cz=Math.floor(z/CHUNK);
+    const localX=((x%CHUNK)+CHUNK)%CHUNK;
+    const localZ=((z%CHUNK)+CHUNK)%CHUNK;
     chunks.add(`${cx},${cz}`);
-    if(x%CHUNK===0)chunks.add(`${cx-1},${cz}`);
-    if(x%CHUNK===CHUNK-1)chunks.add(`${cx+1},${cz}`);
-    if(z%CHUNK===0)chunks.add(`${cx},${cz-1}`);
-    if(z%CHUNK===CHUNK-1)chunks.add(`${cx},${cz+1}`);
+    if(localX===0)chunks.add(`${cx-1},${cz}`);
+    if(localX===CHUNK-1)chunks.add(`${cx+1},${cz}`);
+    if(localZ===0)chunks.add(`${cx},${cz-1}`);
+    if(localZ===CHUNK-1)chunks.add(`${cx},${cz+1}`);
   }
   rebuildEditedChunkHeights();
   for(const chunk of chunks){
     if(!loaded.has(chunk))continue;
     const [cx,cz]=chunk.split(',').map(Number);
-    rebuild(cx,cz);
+    rebuild(cx,cz,true);
   }
+  if(chunks.size)updateWaterSurface();
   scheduleSave();
 }
 function writeBlock(x,y,z,id){
