@@ -63,17 +63,27 @@ function conditionMatches(condition, properties) {
 }
 
 function chooseVariants(state, id, overrides = {}) {
-  const properties=id==='redstone_wire'
+  const defaults=id==='redstone_wire'
     ? {...defaultProperties,north:'none',south:'none',east:'none',west:'none',...overrides}
     : {...defaultProperties,...overrides};
   if(state.variants) {
     const entries = Object.entries(state.variants);
-    const preferred = entries.find(([settings]) =>
-      !settings || settings.split(',').every(pair => {
-        const [name, value]=pair.split('=');
-        return properties[name] === value;
-      }));
-    const variant = (preferred || entries[0])?.[1];
+    // Vanilla variants often use a different property domain than generic
+    // defaults (e.g. door half=lower rather than slab half=bottom). Require
+    // explicitly requested values, then pick the closest valid default state.
+    const candidates=entries.map(([key,value])=>({
+      value,
+      properties:Object.fromEntries(key?key.split(',').map(pair=>pair.split('=')):[]),
+    }));
+    const matching=candidates.filter(candidate=>Object.entries(overrides).every(
+      ([name,value])=>candidate.properties[name]===String(value)||!(name in candidate.properties),
+    ));
+    const pool=matching.length?matching:candidates;
+    const score=candidate=>Object.entries(candidate.properties).reduce(
+      (total,[name,value])=>total+(defaults[name]===value?1:0),0,
+    );
+    const variant=pool.reduce((best,candidate)=>
+      !best||score(candidate)>score(best)?candidate:best,null)?.value;
     return variant ? [Array.isArray(variant) ? variant[0] : variant] : [];
   }
   if(state.multipart) {
