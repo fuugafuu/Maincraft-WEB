@@ -11,6 +11,21 @@ export function configureRenderer(renderer, touchDevice) {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, touchDevice ? 1.35 : 2));
 }
 
+// Keep the shadow camera near the player while retaining a consistent sun
+// direction regardless of how far the player travels from world origin.
+export function positionSunForPlayer(sun, location, timeOfDay) {
+  const angle = (timeOfDay / 24000) * Math.PI * 2;
+  const elevation = Math.sin(angle);
+  sun.target.position.set(location.x, location.y, location.z);
+  sun.position.set(
+    location.x + Math.cos(angle) * 80,
+    location.y + Math.max(5, elevation * 85),
+    location.z + 35,
+  );
+  sun.target.updateMatrixWorld();
+  return elevation;
+}
+
 export function createSky(scene) {
   const sky = new Sky();
   sky.scale.setScalar(450000);

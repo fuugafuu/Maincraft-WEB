@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
-import { configureRenderer, createSky, createBlockLighting, makeTerrainMaterial, makeWaterMaterial } from './renderPipeline.js';
+import { configureRenderer, createSky, createBlockLighting, makeTerrainMaterial, makeWaterMaterial, positionSunForPlayer } from './renderPipeline.js';
 import { loadJavaResources } from './javaAssets.js';
 import { rememberJavaJar, recallJavaJar } from './javaJarStore.js';
 import { DEFAULT_CONTROLS, settings, createSettingsUI } from './settings.js';
@@ -747,9 +747,7 @@ function updateChunks(){
     }
   }
   if(removedChunks)updateWaterSurface();
-  sun.position.set(location.x+50,80,location.z+30);
-  sun.target.position.set(location.x,0,location.z);
-  sun.target.updateMatrixWorld();
+  positionSunForPlayer(sun,location,timeOfDay);
 }
 function loadNextChunk(){
   const next=pendingChunks.shift();
@@ -1827,7 +1825,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     break;
   }
   default:chat(`不明なコマンド: /${cmd}。/help を参照してください`)} }
-function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.sin(a);sun.position.set(location.x+Math.cos(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);ambientLight.intensity=(.18+daylight*1.55)*(.7+settings.brightness*.006);sun.castShadow=settings.shadows&&daylight>.07;scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);atmosphere.update(new THREE.Vector3().subVectors(sun.position,sun.target.position).normalize(),weather);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
+function updateSun(){const elevation=positionSunForPlayer(sun,location,timeOfDay);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);ambientLight.intensity=(.18+daylight*1.55)*(.7+settings.brightness*.006);sun.castShadow=settings.shadows&&daylight>.07;scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);atmosphere.update(new THREE.Vector3().subVectors(sun.position,sun.target.position).normalize(),weather);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
 if(isTouchDevice){
   let lookPointer=null;
   let previousX=0,previousY=0;
