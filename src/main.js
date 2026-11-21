@@ -688,13 +688,23 @@ function updateWaterSurface(){
       if(getBlock(x,SEA,z)==='water'&&getBlock(x,SEA+1,z)===AIR)addSurface(x,SEA,z);
     }
   }
-  // Only edited water needs an additional scan: generated oceans already use SEA.
+  // Most generated water is covered by the fixed sea surface. Edits can open
+  // lower water layers or place water above sea level, so inspect edited columns.
+  const editedColumns=new Set();
   for(const [position,id] of savedEdits){
-    if(id!=='water')continue;
     const [x,y,z]=position.split(',').map(Number);
-    if(y===SEA||!loaded.has(`${Math.floor(x/CHUNK)},${Math.floor(z/CHUNK)}`))continue;
-    if(getBlock(x,y+1,z)!==AIR)continue;
-    addSurface(x,y,z);
+    if(!loaded.has(`${Math.floor(x/CHUNK)},${Math.floor(z/CHUNK)}`))continue;
+    editedColumns.add(`${x},${z}`);
+    if(id==='water'&&y>SEA&&getBlock(x,y+1,z)===AIR)addSurface(x,y,z);
+  }
+  for(const column of editedColumns){
+    const [x,z]=column.split(',').map(Number);
+    // The ordinary sea tile has already been emitted above.
+    for(let y=SEA-1;y>=1;y--){
+      if(getBlock(x,y,z)==='water'&&getBlock(x,y+1,z)===AIR){
+        addSurface(x,y,z);
+      }
+    }
   }
   const makeGeometry=(vertices,texcoords)=>{
     const geometry=new THREE.BufferGeometry();
