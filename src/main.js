@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
-import { configureRenderer, createSky, makeTerrainMaterial, makeWaterMaterial } from './renderPipeline.js';
+import { configureRenderer, createSky, createBlockLighting, makeTerrainMaterial, makeWaterMaterial } from './renderPipeline.js';
 import { loadJavaResources } from './javaAssets.js';
 import { rememberJavaJar, recallJavaJar } from './javaJarStore.js';
+import { DEFAULT_CONTROLS, settings, createSettingsUI } from './settings.js';
 import { MobWorld } from './mobs.js';
 import './style.css';
 
@@ -64,17 +65,43 @@ let javaResources = null;
 const app = document.getElementById('app');
 app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><label for="javajar">Minecraft 1.21.11 Java Client (.jar)</label><input id="javajar" class="field" type="file" accept=".jar,.zip,application/java-archive"><div id="assetstatus" class="assetstatus">Optional: load textures and models from your own installation, locally in your browser.</div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 中クリック 選択 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobtop"><button data-action="pause" aria-label="メニュー">☰</button><button data-action="chat" aria-label="チャットとコマンド">⌨</button><button data-action="fly" aria-label="飛行切り替え">飛行</button></div><div class="mobgroup"><span></span><button data-key="KeyW" aria-label="前進">▲</button><span></span><button data-key="KeyA" aria-label="左移動">◀</button><button data-key="KeyS" aria-label="後退">▼</button><button data-key="KeyD" aria-label="右移動">▶</button></div><div class="mobactions"><button data-key="ControlLeft" aria-label="下降">↓</button><button data-key="Space" aria-label="ジャンプ・上昇">↑</button><button data-action="break" aria-label="破壊">⛏</button><button data-action="pick" aria-label="見ているブロックを選択">▤</button><button data-action="place" aria-label="設置">▣</button><button data-action="inventory" aria-label="インベントリ">▦</button></div><div class="mobhint">画面をスワイプして視点移動</div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><input id="itemsearch" class="field" placeholder="Search blocks / ブロック検索" autocomplete="off"><div id="itemcount" class="itemcount"></div><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="loadassets">Load Java 1.21.11 textures</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
 const $=s=>document.querySelector(s);
+// Keep the existing world creation controls, but show them only after the
+// singleplayer entry, as in the Java client title flow.
+const worldSetupCard=$('#menu .menu-card');
+worldSetupCard.classList.add('world-setup-card','hidden');
+worldSetupCard.querySelector('h1').textContent='ワールドを作成';
+worldSetupCard.querySelector('.subtitle').textContent='シングルプレイ / ワールド設定';
+worldSetupCard.querySelector('.mark').remove();
+worldSetupCard.querySelector('p').remove();
+const titleCard=document.createElement('div');
+titleCard.className='mc-title-screen';
+titleCard.innerHTML=`<div class="mc-logo" role="heading" aria-level="1">MAINCRAFT<span>JAVA EDITION · WEB</span></div>
+  <div class="mc-title-actions"><button id="title-singleplayer" class="primary">シングルプレイ</button>
+  <button id="title-options" class="secondary">設定…</button></div>
+  <div class="mc-title-footer"><span>Java 1.21.11 inspired · Web Edition</span><span>ローカルワールド</span></div>`;
+$('#menu').prepend(titleCard);
+const worldBack=document.createElement('button');
+worldBack.id='world-back';worldBack.className='secondary';worldBack.textContent='戻る';
+worldSetupCard.appendChild(worldBack);
+function showTitleScreen(){titleCard.classList.remove('hidden');worldSetupCard.classList.add('hidden')}
+function showWorldSetup(){titleCard.classList.add('hidden');worldSetupCard.classList.remove('hidden')}
+$('#title-singleplayer').onclick=showWorldSetup;
+worldBack.onclick=showTitleScreen;
 $('#resume').insertAdjacentHTML('afterend','<div id="worldlist" class="worldlist hidden" aria-label="保存されたワールド"></div>');
 $('#worldlist').insertAdjacentHTML('afterend','<button class="secondary" id="importworld">ワールドデータを読み込む（JSON）</button><input id="importfile" type="file" accept=".json,application/json" class="hidden" aria-label="ワールドデータファイル">');
 $('#save').insertAdjacentHTML('afterend','<button class="secondary" id="exportworld">ワールドを書き出す（JSON）</button>');
+$('#save').insertAdjacentHTML('beforebegin','<button class="secondary" id="pause-settings">設定…</button>');
+$('#resume').insertAdjacentHTML('beforebegin','<button class="secondary" id="title-settings">設定…</button>');
+$('#pause').insertAdjacentHTML('afterend','<div id="settings-overlay" class="hidden" role="dialog" aria-modal="true" aria-label="設定"></div>');
 const game=$('#game'), canvas=document.createElement('canvas');
 const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
 configureRenderer(renderer,isTouchDevice);renderer.setSize(innerWidth,innerHeight);game.appendChild(renderer.domElement);
 const scene=new THREE.Scene();scene.background=new THREE.Color(0x8bc3e4);scene.fog=new THREE.Fog(0x8bc3e4,45,130);
 const atmosphere=createSky(scene);
-const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,.05,250);
-const sun=new THREE.DirectionalLight(0xfff1ca,2.6);sun.position.set(50,80,30);sun.castShadow=true;sun.shadow.mapSize.set(isTouchDevice ? 1024 : 2048,isTouchDevice ? 1024 : 2048);sun.shadow.camera.left=-85;sun.shadow.camera.right=85;sun.shadow.camera.top=85;sun.shadow.camera.bottom=-85;sun.shadow.camera.near=1;sun.shadow.camera.far=250;sun.shadow.bias=-.0007;scene.add(sun,sun.target);
-scene.add(new THREE.HemisphereLight(0xd0ecff,0x4b5039,2));
+const camera=new THREE.PerspectiveCamera(settings.fov,innerWidth/innerHeight,.05,250);
+const sun=new THREE.DirectionalLight(0xfff1ca,2.6);sun.position.set(50,80,30);sun.castShadow=true;sun.shadow.mapSize.set(isTouchDevice ? 1024 : 2048,isTouchDevice ? 1024 : 2048);sun.shadow.camera.left=-48;sun.shadow.camera.right=48;sun.shadow.camera.top=48;sun.shadow.camera.bottom=-48;sun.shadow.camera.near=1;sun.shadow.camera.far=250;sun.shadow.bias=-.0003;sun.shadow.normalBias=.015;scene.add(sun,sun.target);
+const ambientLight=new THREE.HemisphereLight(0xd0ecff,0x4b5039,2);scene.add(ambientLight);
+const blockLighting=createBlockLighting(scene,isTouchDevice);
 const waterSurface=makeWaterMaterial();
 const waterMaterial=waterSurface.material;
 const water=new THREE.Mesh(new THREE.BufferGeometry(),waterMaterial);water.rotation.x=-Math.PI/2;water.position.y=SEA+.14;scene.add(water);
@@ -517,6 +544,7 @@ function moveVertical(dy){
 function setBlock(x,y,z,id){
   if(y<1||y>100)return;
   writeBlock(x,y,z,id);
+  blockLighting.invalidate();
   if(id!==AIR)rememberEditHeight(x,y,z);
   for(let cx=Math.floor(x/CHUNK)-1;cx<=Math.floor(x/CHUNK)+1;cx++)for(let cz=Math.floor(z/CHUNK)-1;cz<=Math.floor(z/CHUNK)+1;cz++){
     if(x>=cx*CHUNK-1&&x<=cx*CHUNK+CHUNK&&z>=cz*CHUNK-1&&z<=cz*CHUNK+CHUNK)rebuild(cx,cz);
@@ -624,7 +652,7 @@ function updateChunks(){
   if(cx===lastChunkX&&cz===lastChunkZ)return;
   lastChunkX=cx;lastChunkZ=cz;
   pendingChunks=[];
-  for(let a=cx-RADIUS;a<=cx+RADIUS;a++)for(let b=cz-RADIUS;b<=cz+RADIUS;b++){
+  for(let a=cx-settings.renderDistance;a<=cx+settings.renderDistance;a++)for(let b=cz-settings.renderDistance;b<=cz+settings.renderDistance;b++){
     if(!loaded.has(`${a},${b}`))pendingChunks.push([a,b]);
   }
   pendingChunks.sort((a,b)=>
@@ -632,7 +660,7 @@ function updateChunks(){
   let removedChunks=false;
   for(const [k,g] of loaded){
     const [x,z]=k.split(',').map(Number);
-    if(Math.abs(x-cx)>RADIUS||Math.abs(z-cz)>RADIUS){
+    if(Math.abs(x-cx)>settings.renderDistance||Math.abs(z-cz)>settings.renderDistance){
       chunkGroup.remove(g);g.traverse(o=>o.geometry?.dispose());loaded.delete(k);removedChunks=true;
     }
   }
@@ -840,6 +868,21 @@ async function importJavaJar(file,persist=true){
     for(const id of imported.itemNames)registerItem(id, imported.displayName(id));
     const old=javaResources;
     javaResources=imported;
+    const guiSprites={
+      '--mc-button':'sprites/widget/button',
+      '--mc-button-hover':'sprites/widget/button_highlighted',
+      '--mc-hotbar':'sprites/hud/hotbar',
+      '--mc-hotbar-selected':'sprites/hud/hotbar_selection',
+      '--mc-crosshair':'sprites/hud/crosshair',
+      '--mc-inventory':'container/inventory',
+      '--mc-creative':'container/creative_inventory/tab_inventory',
+      '--mc-title':'title/background/panorama_0',
+    };
+    for(const [property,path] of Object.entries(guiSprites)){
+      const url=imported.guiIcon(path);
+      if(url)document.documentElement.style.setProperty(property,`url("${url}")`);
+      else document.documentElement.style.removeProperty(property);
+    }
     for(const id of new Set([...slots,'grass','dirt','stone','sand','wood','leaves','planks','glass','bricks','cobble','snow','gold','diamond','obsidian','bedrock','sandstone','coal_ore','iron_ore','gold_ore','diamond_ore'])){
       await javaResources.ensure(id);
     }
@@ -991,7 +1034,8 @@ function inventorySlot(index){
   return chest?[chest.items,chest.counts,index-36]:null;
 }
 let creativePage=0;
-const CREATIVE_PAGE_SIZE=120;
+// Nine columns by five rows matches the visible creative item grid.
+const CREATIVE_PAGE_SIZE=45;
 function renderInventory(query=''){
   if(mode==='survival'){
     const cells=[...storageSlots,...slots];
@@ -1124,7 +1168,7 @@ function openInventory(useTable=false){
   $('#itemsearch').value='';
   creativePage=0;
   renderInventory();
-  if(!isTouchDevice)$('#itemsearch').focus();
+  if(!isTouchDevice&&mode==='creative')requestAnimationFrame(()=>$('#itemsearch').focus());
 }
 function openChest(x,y,z){
   openInventory();
@@ -1146,12 +1190,57 @@ function closeInventory(){
   if(active&&!paused)lockPointer();
 }
 $('#closeinv').onclick=closeInventory;
+const settingsOverlay=$('#settings-overlay');
+let settingsReturn='title';
+function applyVideoSettings(){
+  renderer.toneMappingExposure=.75+settings.brightness*.007;
+  renderer.shadowMap.enabled=settings.shadows;
+  sun.castShadow=settings.shadows;
+  renderer.shadowMap.needsUpdate=true;
+  if(active)updateSun();
+  camera.fov=settings.fov;camera.updateProjectionMatrix();
+  scene.fog.near=settings.graphics==='fast'?38:45;
+  scene.fog.far=settings.renderDistance*CHUNK+45;
+  lastChunkX=Infinity;lastChunkZ=Infinity;
+  if(active)updateChunks();
+}
+const settingsUI=createSettingsUI(settingsOverlay,{
+  onApply:applyVideoSettings,
+  onClose:()=>{
+    settingsOverlay.classList.add('hidden');
+    (settingsReturn==='pause'?$('#pause'):$('#menu')).classList.remove('hidden');
+  },
+});
+function openSettings(from){
+  settingsReturn=from;
+  if(from==='pause')$('#pause').classList.add('hidden');
+  else $('#menu').classList.add('hidden');
+  settingsUI.render();
+  settingsOverlay.classList.remove('hidden');
+}
+$('#pause-settings').onclick=()=>openSettings('pause');
+$('#title-settings').onclick=()=>openSettings('title');
+$('#title-options').onclick=()=>openSettings('title');
+applyVideoSettings();
 function pause(){if(!active)return;paused=true;document.exitPointerLock?.();$('#pause').classList.remove('hidden')}
 function unpause(){paused=false;$('#pause').classList.add('hidden');lockPointer()}
-$('#continue').onclick=unpause;$('#save').onclick=()=>{saveData();notice('保存しました');unpause()};$('#back').onclick=()=>{saveData();active=false;paused=false;$('#pause').classList.add('hidden');$('#hud').classList.add('hidden');$('#menu').classList.remove('hidden')};
+$('#continue').onclick=unpause;$('#save').onclick=()=>{saveData();notice('保存しました');unpause()};$('#back').onclick=()=>{saveData();active=false;paused=false;$('#pause').classList.add('hidden');$('#hud').classList.add('hidden');$('#menu').classList.remove('hidden');showTitleScreen()};
 document.addEventListener('pointerlockchange',()=>{if(!isTouchDevice&&!document.pointerLockElement&&active&&!inventoryOpen&&!chatOpen&&!paused)pause()});
-document.addEventListener('mousemove',e=>{if(document.pointerLockElement!==renderer.domElement||paused)return;yaw-=e.movementX*.0024;pitch=clamp(pitch-e.movementY*.0024,-Math.PI/2+.01,Math.PI/2-.01)});
-document.addEventListener('keydown',e=>{if(!active)return;if(chatOpen){if(e.code==='Enter'){execute($('#command').value);$('#command').value='';closeChat()}else if(e.code==='Escape')closeChat();return}if(inventoryOpen){if(e.code==='Escape'||e.code==='KeyE')closeInventory();return}if(e.code==='Escape'){pause();return}if(paused)return;if(e.code==='KeyT'||e.code==='Slash'){openChat(e.code==='Slash'?'/':'');e.preventDefault();return}if(e.code==='KeyE'){openInventory();return}if(e.code==='KeyF'){fly=!fly;vy=0;notice(fly?'飛行モード ON':'飛行モード OFF');return}if(/^Digit[1-9]$/.test(e.code)){selected=Number(e.code.slice(-1))-1;renderHotbar()}keys.add(e.code);if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault()});
+document.addEventListener('mousemove',e=>{if(document.pointerLockElement!==renderer.domElement||paused)return;const scale=.0024*settings.sensitivity/50;yaw-=e.movementX*scale;pitch=clamp(pitch-e.movementY*scale,-Math.PI/2+.01,Math.PI/2-.01)});
+document.addEventListener('keydown',e=>{
+  if(!settingsOverlay.classList.contains('hidden')){if(e.code==='Escape'){settingsUI.cancelKeyCapture();return}return}
+  if(!active)return;
+  if(chatOpen){if(e.code==='Enter'){execute($('#command').value);$('#command').value='';closeChat()}else if(e.code==='Escape')closeChat();return}
+  if(inventoryOpen){if(e.code==='Escape'||e.code===settings.controls.inventory)closeInventory();return}
+  if(e.code===settings.controls.pause){if(paused)unpause();else pause();return}
+  if(paused)return;
+  if(e.code===settings.controls.chat||e.code==='Slash'){openChat(e.code==='Slash'?'/':'');e.preventDefault();return}
+  if(e.code===settings.controls.inventory){e.preventDefault();openInventory();return}
+  if(e.code===settings.controls.fly){fly=!fly;vy=0;notice(fly?'飛行モード ON':'飛行モード OFF');return}
+  if(/^Digit[1-9]$/.test(e.code)){selected=Number(e.code.slice(-1))-1;renderHotbar()}
+  keys.add(e.code);
+  if([settings.controls.jump,'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault();
+});
 document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>keys.clear());
 renderer.domElement.addEventListener('contextmenu',e=>e.preventDefault());renderer.domElement.addEventListener('mousedown',e=>{if(!active||paused||inventoryOpen||chatOpen||isTouchDevice)return;if(document.pointerLockElement!==renderer.domElement){lockPointer();return}if(e.button===0)interact(false);if(e.button===1)pickBlock();if(e.button===2)interact(true)});
 document.addEventListener('wheel',e=>{if(!active||paused||inventoryOpen)return;selected=(selected+(e.deltaY>0?1:8))%9;renderHotbar()},{passive:true});
@@ -1242,6 +1331,7 @@ function openChat(prefill=''){chatOpen=true;document.exitPointerLock?.();$('#cha
 function closeChat(){chatOpen=false;$('#chat').classList.add('hidden');lockPointer()}
 function chat(text){const log=$('#chatlog');const line=document.createElement('div');line.textContent=text;log.appendChild(line);log.scrollTop=log.scrollHeight;while(log.children.length>16)log.firstChild.remove()}
 function updateBlockRegion(positions){
+  blockLighting.invalidate();
   const chunks=new Set();
   for(const [x,,z] of positions){
     const cx=Math.floor(x/CHUNK),cz=Math.floor(z/CHUNK);
@@ -1550,7 +1640,7 @@ function execute(raw){const input=raw.trim();if(!input)return;if(!input.startsWi
     break;
   }
   default:chat(`不明なコマンド: /${cmd}。/help を参照してください`)} }
-function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.sin(a);sun.position.set(location.x+Math.cos(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);atmosphere.update(new THREE.Vector3().subVectors(sun.position,sun.target.position).normalize(),weather);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
+function updateSun(){const a=(timeOfDay/24000)*Math.PI*2;const elevation=Math.sin(a);sun.position.set(location.x+Math.cos(a)*80,Math.max(5,elevation*85),location.z+35);sun.intensity=Math.max(.13,elevation*2.35);const daylight=clamp((elevation+.2)*1.25,0,1)*(weather==='thunder'?.52:weather==='rain'?.78:1);ambientLight.intensity=(.18+daylight*1.55)*(.7+settings.brightness*.006);sun.castShadow=settings.shadows&&daylight>.07;scene.background.setRGB(THREE.MathUtils.lerp(.035,.53,daylight),THREE.MathUtils.lerp(.06,.76,daylight),THREE.MathUtils.lerp(.16,.92,daylight));scene.fog.color.copy(scene.background);atmosphere.update(new THREE.Vector3().subVectors(sun.position,sun.target.position).normalize(),weather);waterMaterial.color.set(daylight>.4?0x3b8cbb:0x1b405e);if(reflectedWater)reflectedWater.material.uniforms.color.value.set(daylight>.4?0x3b8cbb:0x1b405e);skyClouds.visible=daylight>.25}
 if(isTouchDevice){
   let lookPointer=null;
   let previousX=0,previousY=0;
@@ -1583,7 +1673,8 @@ if(isTouchDevice){
       if(!active||paused||inventoryOpen||chatOpen)return;
       event.preventDefault();
       btn.setPointerCapture(event.pointerId);
-      const code=btn.dataset.key;
+      const action=Object.keys(DEFAULT_CONTROLS).find(name=>DEFAULT_CONTROLS[name]===btn.dataset.key);
+      const code=action?settings.controls[action]:btn.dataset.key;
       if(code){keys.add(code);held.set(event.pointerId,code);return}
       switch(btn.dataset.action){
         case 'break':interact(false);break;
@@ -1601,7 +1692,7 @@ if(isTouchDevice){
   }
 }
 let last=performance.now(),frames=0,fps=0,second=0,daylightRefresh=0,worldAutosave=0;
-function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();updateEffects(dt);const forward=Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown'));const strafe=Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const sprinting=(keys.has('ShiftLeft')||keys.has('ShiftRight'))&&(mode==='creative'||foodLevel>6);const speed=(sprinting?10:5.4)*Math.max(.1,1+(effectLevel('speed')+1)*.2-(effectLevel('slowness')+1)*.15);const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();updateEffects(dt);const forward=Number(keys.has(settings.controls.forward)||keys.has('ArrowUp'))-Number(keys.has(settings.controls.backward)||keys.has('ArrowDown'));const strafe=Number(keys.has(settings.controls.right)||keys.has('ArrowRight'))-Number(keys.has(settings.controls.left)||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const sprinting=(keys.has(settings.controls.sprint))&&(mode==='creative'||foodLevel>6);const speed=(sprinting?10:5.4)*Math.max(.1,1+(effectLevel('speed')+1)*.2-(effectLevel('slowness')+1)*.15);const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
     updateHunger(dt,!!(forward||strafe),sprinting);
     playerDamageCooldown=Math.max(0,playerDamageCooldown-dt);
     mobs.update(dt,now/1000,location,(amount)=>{
@@ -1615,17 +1706,17 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
     }
     worldAutosave+=dt;
     if(worldAutosave>=30){saveData();worldAutosave=0}
-    if(fly){fallDistance=0;location.x+=dx;location.z+=dz;location.y+=(Number(keys.has('Space'))-Number(keys.has('ControlLeft')))*speed*dt;vy=0}else{
+    if(fly){fallDistance=0;location.x+=dx;location.z+=dz;location.y+=(Number(keys.has(settings.controls.jump))-Number(keys.has(settings.controls.sneak)))*speed*dt;vy=0}else{
       const swimming=playerInWater();
       moveHorizontal(dx*(swimming?.55:1),dz*(swimming?.55:1));
       if(swimming){
         // Drag and buoyancy make water traversal distinct from falling through air.
         vy=Math.max(-2.5,vy-5*dt);
-        if(keys.has('Space'))vy=Math.min(3.4,vy+18*dt);
-        if(keys.has('ControlLeft'))vy=Math.max(-3.4,vy-18*dt);
+        if(keys.has(settings.controls.jump))vy=Math.min(3.4,vy+18*dt);
+        if(keys.has(settings.controls.sneak))vy=Math.max(-3.4,vy-18*dt);
         vy*=Math.pow(.82,dt*20);
       }else{
-        if(keys.has('Space')&&grounded){vy=8.2+Math.max(0,effectLevel('jump_boost')+1)*1.3;grounded=false}
+        if(keys.has(settings.controls.jump)&&grounded){vy=8.2+Math.max(0,effectLevel('jump_boost')+1)*1.3;grounded=false}
         vy-=22*dt;
       }
       const previousY=location.y;
@@ -1641,6 +1732,6 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
         if(fallDamage>0)damagePlayer(fallDamage);
       }
     }
-    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();updateRain(dt);skyClouds.position.x+=dt*.35;waterSurface.update(now*.001);water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed64}`}}renderer.render(scene,camera)}
+    location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();blockLighting.update(location,getBlock);updateRain(dt);skyClouds.position.x+=dt*.35;waterSurface.update(now*.001);water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed64}`}}renderer.render(scene,camera)}
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});requestAnimationFrame(animate);
 window.addEventListener('beforeunload',saveData);

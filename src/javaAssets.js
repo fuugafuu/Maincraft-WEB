@@ -84,7 +84,8 @@ export async function loadJavaResources(file, progress = () => {}) {
       || entry.name.startsWith(prefix + 'models/item/')
       || entry.name.startsWith(prefix + 'textures/block/')
       || entry.name.startsWith(prefix + 'items/')
-      || entry.name.startsWith(prefix + 'textures/item/'),
+      || entry.name.startsWith(prefix + 'textures/item/')
+      || entry.name.startsWith(prefix + 'textures/gui/'),
   });
   const version = archive['version.json'];
   if (!version || JSON.parse(strFromU8(version)).id !== '1.21.11') {
@@ -108,6 +109,15 @@ export async function loadJavaResources(file, progress = () => {}) {
       || name.replaceAll('_', ' ');
   }
   const iconUrls = new Map();
+  function guiIcon(path) {
+    const name='gui/'+path+'.png';
+    if(iconUrls.has(name))return iconUrls.get(name);
+    const bytes=archive[prefix+'textures/'+name];
+    if(!bytes)return null;
+    const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));
+    iconUrls.set(name,url);
+    return url;
+  }
   function readItemModelTexture(modelName, visited = new Set()) {
     const name = modelName?.replace(/^minecraft:/, '');
     if (!name || visited.has(name)) return null;
@@ -323,6 +333,7 @@ export async function loadJavaResources(file, progress = () => {}) {
     itemNames,
     displayName,
     itemIcon,
+    guiIcon,
     ensure,
     getModel(id){return resolved.get(aliases[id]||id)},
     addBlock,

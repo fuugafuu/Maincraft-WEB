@@ -66,3 +66,47 @@ export function makeWaterMaterial() {
   material.customProgramCacheKey = () => 'water-ripple-v1';
   return { material, update(seconds) { time.value = seconds; } };
 }
+
+const LIGHT_BLOCKS = new Map([
+  ['torch', [0xffb978, 1.3]], ['wall_torch', [0xffb978, 1.3]],
+  ['lantern', [0xffdca0, 1.6]], ['soul_lantern', [0x8bcaff, 1.3]],
+  ['soul_torch', [0x8bcaff, 1.2]], ['glowstone', [0xffdca0, 2.1]],
+  ['sea_lantern', [0xaeefff, 2.0]], ['shroomlight', [0xffaa73, 1.9]],
+  ['jack_o_lantern', [0xffc076, 1.5]], ['lava', [0xff812a, 2.0]],
+  ['end_rod', [0xd9e7ff, 1.7]],
+]);
+
+// Update a small pool of nearby lights instead of creating a GPU light per block.
+export function createBlockLighting(scene, isTouchDevice) {
+  const lights=Array.from({length:isTouchDevice?3:6},()=>{
+    const light=new THREE.PointLight(0xffffff,0,12,2);
+    light.visible=false;
+    scene.add(light);
+    return light;
+  });
+  let lastX=Infinity,lastY=Infinity,lastZ=Infinity;
+  return {
+    update(position,getBlock,force=false) {
+      const px=Math.floor(position.x),py=Math.floor(position.y),pz=Math.floor(position.z);
+      if(!force&&px===lastX&&py===lastY&&pz===lastZ)return;
+      lastX=px;lastY=py;lastZ=pz;
+      const candidates=[];
+      for(let dx=-9;dx<=9;dx+=1)for(let dz=-9;dz<=9;dz+=1)for(let dy=-5;dy<=4;dy+=1){
+        const distance=dx*dx+dz*dz+dy*dy;
+        if(distance>100)continue;
+        const data=LIGHT_BLOCKS.get(getBlock(px+dx,py+dy,pz+dz));
+        if(data)candidates.push({x:px+dx+.5,y:py+dy+.65,z:pz+dz+.5,distance,data});
+      }
+      candidates.sort((a,b)=>a.distance-b.distance);
+      lights.forEach((light,index)=>{
+        const source=candidates[index];
+        light.visible=!!source;
+        if(!source)return;
+        light.color.setHex(source.data[0]);
+        light.intensity=source.data[1];
+        light.position.set(source.x,source.y,source.z);
+      });
+    },
+    invalidate(){lastX=Infinity},
+  };
+}
