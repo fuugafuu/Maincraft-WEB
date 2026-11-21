@@ -114,6 +114,12 @@ export async function loadJavaResources(file, progress = () => {}) {
     if(iconUrls.has(name))return iconUrls.get(name);
     const bytes=archive[prefix+'textures/'+name];
     if(!bytes)return null;
+    // Some 1.21.11 client entries are 1x1 transparent placeholders. Never
+    // stretch them across the screen as if they were the real GUI artwork.
+    if(bytes.length>=24&&bytes[0]===137&&bytes[1]===80){
+      const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+      if(view.getUint32(16)===1&&view.getUint32(20)===1)return null;
+    }
     const url=URL.createObjectURL(new Blob([bytes],{type:'image/png'}));
     iconUrls.set(name,url);
     return url;

@@ -65,6 +65,8 @@ let javaResources = null;
 const app = document.getElementById('app');
 app.innerHTML = `<div id="game"></div><div id="menu"><div class="menu-card"><div class="mark"></div><h1>MAIN<span>CRAFT</span></h1><div class="subtitle">WEB · VOXEL SANDBOX</div><p>ブラウザの中に、あなただけの世界を。</p><label>ワールド名</label><input class="field" id="worldname" maxlength="40" value="新しいワールド"><div class="row"><div><label>シード値（文字も入力可）</label><input class="field" id="seed" placeholder="空欄でランダム"></div><div><label>ゲームモード</label><select class="field" id="mode"><option value="creative">クリエイティブ</option><option value="survival">サバイバル（試作）</option></select></div></div><label for="javajar">Minecraft 1.21.11 Java Client (.jar)</label><input id="javajar" class="field" type="file" accept=".jar,.zip,application/java-archive"><div id="assetstatus" class="assetstatus">Optional: load textures and models from your own installation, locally in your browser.</div><button class="primary" id="create">新しいワールドを作成</button><button class="secondary" id="resume">保存したワールドを読み込む</button><div class="tiny">自動保存 · シード生成 · WebGL 3D · オフラインデータ保存</div></div></div><div id="hud" class="hidden"><div id="crosshair"></div><div id="coords"></div><div id="tip">W A S D 移動 · マウス 視点<br>左クリック 破壊 · 中クリック 選択 · 右クリック 設置<br>Space ジャンプ · Shift 走る · F 飛行<br>E インベントリ · T / チャット<br>1〜9 選択 · Esc ポーズ</div><div id="notice"></div><div id="bottom"><div id="selected-name"></div><div id="hotbar"></div></div><div id="chat" class="hidden"><div id="chatlog"></div><input id="command" placeholder="コマンドを入力（/help）" autocomplete="off"></div><div id="mobile"><div class="mobtop"><button data-action="pause" aria-label="メニュー">☰</button><button data-action="chat" aria-label="チャットとコマンド">⌨</button><button data-action="fly" aria-label="飛行切り替え">飛行</button></div><div class="mobgroup"><span></span><button data-key="KeyW" aria-label="前進">▲</button><span></span><button data-key="KeyA" aria-label="左移動">◀</button><button data-key="KeyS" aria-label="後退">▼</button><button data-key="KeyD" aria-label="右移動">▶</button></div><div class="mobactions"><button data-key="ControlLeft" aria-label="下降">↓</button><button data-key="Space" aria-label="ジャンプ・上昇">↑</button><button data-action="break" aria-label="破壊">⛏</button><button data-action="pick" aria-label="見ているブロックを選択">▤</button><button data-action="place" aria-label="設置">▣</button><button data-action="inventory" aria-label="インベントリ">▦</button></div><div class="mobhint">画面をスワイプして視点移動</div></div></div><div id="inventory" class="hidden"><div class="inventory-panel"><button class="close" id="closeinv">×</button><h2>ブロックとアイテム</h2><p>選択するとホットバーの現在のスロットにセットします。</p><input id="itemsearch" class="field" placeholder="Search blocks / ブロック検索" autocomplete="off"><div id="itemcount" class="itemcount"></div><div class="items" id="items"></div></div></div><div id="pause" class="hidden"><div class="pause-card"><h2>ゲームメニュー</h2><button class="primary" id="continue">ゲームに戻る</button><button class="secondary" id="loadassets">Load Java 1.21.11 textures</button><button class="secondary" id="save">ワールドを保存</button><button class="secondary" id="back">タイトル画面へ</button></div></div>`;
 const $=s=>document.querySelector(s);
+$('#itemsearch').insertAdjacentHTML('beforebegin','<nav id="creative-tabs" class="creative-tabs hidden" aria-label="クリエイティブインベントリのカテゴリ"></nav>');
+$('#items').insertAdjacentHTML('afterend','<div id="creative-hotbar" class="creative-hotbar hidden" aria-label="クリエイティブのホットバー"></div>');
 // Keep the existing world creation controls, but show them only after the
 // singleplayer entry, as in the Java client title flow.
 const worldSetupCard=$('#menu .menu-card');
@@ -890,7 +892,7 @@ async function importJavaJar(file,persist=true){
       if(id!=='air')await javaResources.ensure(id);
     }
     old?.dispose();
-    if(active)for(const chunk of [...loaded.keys()]){
+    if(active||titlePreviewReady)for(const chunk of [...loaded.keys()]){
       const [cx,cz]=chunk.split(',').map(Number);
       rebuild(cx,cz);
     }
@@ -1034,9 +1036,45 @@ function inventorySlot(index){
   return chest?[chest.items,chest.counts,index-36]:null;
 }
 let creativePage=0;
+let creativeCarried=null;
 // Nine columns by five rows matches the visible creative item grid.
 const CREATIVE_PAGE_SIZE=45;
+const CREATIVE_TABS=[
+  ['building','建築ブロック'],['colored','色付きブロック'],['natural','自然ブロック'],
+  ['functional','機能ブロック'],['redstone','レッドストーン'],['tools','道具'],
+  ['combat','戦闘'],['food','食べ物'],['ingredients','材料'],
+  ['spawn','スポーンエッグ'],['search','検索'],
+];
+let creativeTab='building';
+const COLOR_PREFIX=/(?:^|_)(?:white|orange|magenta|light_blue|yellow|lime|pink|gray|light_gray|cyan|purple|blue|brown|green|red|black)(?:_|$)/;
+function creativeCategory(id){
+  if(id.endsWith('_spawn_egg'))return 'spawn';
+  if(/(?:^|_)(?:sword|bow|crossbow|trident|mace|shield|helmet|chestplate|leggings|boots|arrow)(?:_|$)|tipped_arrow|spectral_arrow/.test(id))return 'combat';
+  if(/(?:^|_)(?:pickaxe|axe|shovel|hoe|shears|fishing_rod|flint_and_steel|brush|compass|clock|spyglass|map)(?:_|$)|elytra|bucket|lead|saddle/.test(id))return 'tools';
+  if(foodById[id]||/apple|bread|carrot|potato|beef|porkchop|chicken|mutton|rabbit_stew|cookie|cake|pie|melon_slice|berries|suspicious_stew|dried_kelp|cod|salmon|tropical_fish|pufferfish|golden_apple|honey_bottle|beetroot_soup/.test(id))return 'food';
+  if(/redstone|repeater|comparator|piston|observer|dispenser|dropper|hopper|lever|button|pressure_plate|tripwire|daylight_detector|target|rail|detector_rail|activator_rail|lightning_rod|sculk_sensor/.test(id))return 'redstone';
+  if(/crafting_table|furnace|smoker|blast_furnace|chest|barrel|enchanting_table|anvil|grindstone|smithing_table|stonecutter|loom|cartography_table|lectern|brewing_stand|beacon|bell|bed|door|trapdoor|fence_gate|ladder|scaffolding|lantern|torch|campfire|sign|banner|flower_pot|decorated_pot|shulker_box/.test(id))return 'functional';
+  if(COLOR_PREFIX.test(id)&&/wool|concrete|terracotta|glass|stained_glass|carpet|banner|candle|bed|glazed_terracotta/.test(id))return 'colored';
+  if(/grass|dirt|stone|sand|gravel|ore|deepslate|tuff|calcite|basalt|netherrack|end_stone|log|leaves|sapling|flower|mushroom|coral|kelp|vine|moss|root|ice|snow|water|lava|clay|mud|cactus|bamboo|azalea|dripstone|amethyst|sculk/.test(id))return 'natural';
+  if(byId[id])return 'building';
+  return 'ingredients';
+}
+function renderCreativeTabs(){
+  const tabs=$('#creative-tabs');
+  tabs.classList.toggle('hidden',mode!=='creative');
+  if(mode!=='creative')return;
+  tabs.innerHTML=CREATIVE_TABS.map(([id,label])=>`<button type="button" data-creative-tab="${id}" class="${id===creativeTab?'active':''}" aria-pressed="${id===creativeTab}" title="${label}">${label}</button>`).join('');
+  tabs.querySelectorAll('button').forEach(button=>button.onclick=()=>{
+    creativeTab=button.dataset.creativeTab;
+    creativePage=0;
+    $('#itemsearch').value='';
+    $('#itemsearch').classList.toggle('hidden',creativeTab!=='search');
+    renderCreativeTabs();renderInventory();
+    if(creativeTab==='search'&&!isTouchDevice)$('#itemsearch').focus();
+  });
+}
 function renderInventory(query=''){
+  $('#creative-hotbar').classList.toggle('hidden',mode!=='creative');
   if(mode==='survival'){
     const cells=[...storageSlots,...slots];
     const counts=[...storageCounts,...slotCounts];
@@ -1122,7 +1160,9 @@ function renderInventory(query=''){
     return;
   }
   $('#crafting').classList.add('hidden');
-  const matches=[...BLOCKS.filter(b=>b.id!=='bedrock'),...FOODS,...ITEMS].filter(b=>b.id.includes(query.toLowerCase())||b.name.includes(query));
+  const matches=[...BLOCKS,...FOODS,...ITEMS].filter(b=>
+    (creativeTab==='search'||creativeCategory(b.id)===creativeTab)&&
+    (b.id.includes(query.toLowerCase())||b.name.toLowerCase().includes(query.toLowerCase())));
   const pageCount=Math.max(1,Math.ceil(matches.length/CREATIVE_PAGE_SIZE));
   creativePage=Math.min(creativePage,pageCount-1);
   const start=creativePage*CREATIVE_PAGE_SIZE;
@@ -1135,15 +1175,30 @@ function renderInventory(query=''){
   $('#previous-items').onclick=()=>changePage(-1);
   $('#next-items').onclick=()=>changePage(1);
   $('#items').innerHTML=matches.slice(start,start+CREATIVE_PAGE_SIZE).map(b=>`<button class="item-tile" data-id="${b.id}"><i style="${itemStyle(b.id)}"></i>${b.name}</button>`).join('');
-  $$('.item-tile').forEach(el=>el.onclick=async()=>{
+  $$('.item-tile').forEach(el=>el.onclick=async event=>{
     const id=el.dataset.id;
-    slots[selected]=id;
-    slotCounts[selected]=foodById[id]?16:64;
-    renderHotbar();
-    closeInventory();
-    scheduleSave();
+    creativeCarried=id;
+    renderCreativeHotbar();
+    if(event.shiftKey)placeCreativeItem(selected);
     if(byId[id])await ensureJavaBlock(id);
   });
+  renderCreativeHotbar();
+}
+function placeCreativeItem(index){
+  if(creativeCarried){
+    slots[index]=creativeCarried;
+    slotCounts[index]=64;
+    selected=index;
+    renderHotbar();scheduleSave();
+  }else selected=index;
+  renderCreativeHotbar();
+}
+function renderCreativeHotbar(){
+  const root=$('#creative-hotbar');
+  if(mode!=='creative')return;
+  root.innerHTML=`<div class="creative-cursor">${creativeCarried?`選択中: ${itemInfo(creativeCarried)?.name??creativeCarried} · 配置するマスを選択`: 'アイテムを選び、下のスロットに配置'}</div><div class="creative-hotbar-row">${slots.map((id,index)=>`<button type="button" class="creative-hotbar-slot ${index===selected?'selected':''}" data-creative-slot="${index}" title="${itemInfo(id)?.name??'空'}"><i style="${id===AIR?'':itemStyle(id)}"></i><small>${index+1}</small></button>`).join('')}</div><div class="creative-hotbar-actions"><button id="creative-take" type="button" ${creativeCarried?'':'disabled'}>持ち物を解除</button><span>Shift+クリック: 現在の枠に配置</span></div>`;
+  root.querySelectorAll('[data-creative-slot]').forEach(button=>button.onclick=()=>placeCreativeItem(Number(button.dataset.creativeSlot)));
+  root.querySelector('#creative-take').onclick=()=>{creativeCarried=null;renderCreativeHotbar()};
 }
 function openInventory(useTable=false){
   if(inventoryOpen)return;
@@ -1163,12 +1218,15 @@ function openInventory(useTable=false){
   if(!$('#crafting'))$('#items').insertAdjacentHTML('afterend','<section id="crafting" class="hidden"></section>');
   if(!$('#chest-storage'))$('#items').insertAdjacentHTML('beforebegin','<section id="chest-storage" class="hidden"></section>');
   $('#inventory h2').textContent=mode==='survival'?'インベントリ':'ブロックとアイテム';
-  $('#inventory p').textContent=mode==='survival'?'持ち物とホットバーのアイテムを入れ替えます。':'選択するとホットバーの現在のスロットにセットします。';
+  $('#inventory p').textContent=mode==='survival'?'持ち物とホットバーのアイテムを入れ替えます。':'カテゴリからアイテムを選び、下のホットバーに配置します。';
   $('#itemsearch').classList.toggle('hidden',mode==='survival');
   $('#itemsearch').value='';
   creativePage=0;
+  creativeTab='building';
+  creativeCarried=null;
+  renderCreativeTabs();
+  $('#itemsearch').classList.toggle('hidden',mode!=='creative'||creativeTab!=='search');
   renderInventory();
-  if(!isTouchDevice&&mode==='creative')requestAnimationFrame(()=>$('#itemsearch').focus());
 }
 function openChest(x,y,z){
   openInventory();
@@ -1692,7 +1750,44 @@ if(isTouchDevice){
   }
 }
 let last=performance.now(),frames=0,fps=0,second=0,daylightRefresh=0,worldAutosave=0;
-function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();updateEffects(dt);const forward=Number(keys.has(settings.controls.forward)||keys.has('ArrowUp'))-Number(keys.has(settings.controls.backward)||keys.has('ArrowDown'));const strafe=Number(keys.has(settings.controls.right)||keys.has('ArrowRight'))-Number(keys.has(settings.controls.left)||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const sprinting=(keys.has(settings.controls.sprint))&&(mode==='creative'||foodLevel>6);const speed=(sprinting?10:5.4)*Math.max(.1,1+(effectLevel('speed')+1)*.2-(effectLevel('slowness')+1)*.15);const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
+let titlePreviewReady=false;
+function initializeTitlePreview(){
+  if(active)return;
+  worldgenVersion=6;
+  seed=terrainSeed(328947n,6);
+  // Choose a grassy valley with trees for the title preview, instead of
+  // assuming the origin is an appealing biome for this seed.
+  let previewPoint={x:8,z:8,score:-Infinity};
+  for(let x=-96;x<=96;x+=16)for(let z=-96;z<=96;z+=16){
+    const h=height(x,z),region=biome(x,z);
+    if(surface(x,z)!=='grass'||h<SEA+4||h>23)continue;
+    let treeCount=0;
+    for(let dx=-8;dx<=8;dx+=4)for(let dz=-8;dz<=8;dz+=4)
+      if(treeAt(x+dx,z+dz))treeCount++;
+    const score=treeCount*8+(region==='forest'?12:0)-Math.abs(h-17)-Math.hypot(x,z)*.02;
+    if(score>previewPoint.score)previewPoint={x,z,score};
+  }
+  location={x:previewPoint.x+.5,y:height(previewPoint.x,previewPoint.z)+9,z:previewPoint.z+.5};
+  camera.position.set(location.x,location.y,location.z);
+  camera.rotation.order='YXZ';
+  camera.rotation.set(-.24,.65,0,'YXZ');
+  timeOfDay=6500;
+  updateSun();
+  pendingChunks=[];
+  const pcx=Math.floor(location.x/CHUNK),pcz=Math.floor(location.z/CHUNK);
+  for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)pendingChunks.push([pcx+dx,pcz+dz]);
+  pendingChunks.sort((a,b)=>(a[0]-pcx)**2+(a[1]-pcz)**2-(b[0]-pcx)**2-(b[1]-pcz)**2);
+}
+function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last)/1000,.05);last=now;
+  if(!active&&pendingChunks.length){
+    loadNextChunk();
+    if(!titlePreviewReady&&loaded.size){titlePreviewReady=true;$('#menu').classList.add('preview-ready')}
+  }
+  if(!active&&titlePreviewReady){
+    camera.rotation.y=.65+Math.sin(now*.00013)*.17;
+    skyClouds.position.x+=dt*.22;
+  }
+  if(active&&!paused&&!inventoryOpen&&!chatOpen){loadNextChunk();updateEffects(dt);const forward=Number(keys.has(settings.controls.forward)||keys.has('ArrowUp'))-Number(keys.has(settings.controls.backward)||keys.has('ArrowDown'));const strafe=Number(keys.has(settings.controls.right)||keys.has('ArrowRight'))-Number(keys.has(settings.controls.left)||keys.has('ArrowLeft'));const length=Math.hypot(forward,strafe)||1;const sprinting=(keys.has(settings.controls.sprint))&&(mode==='creative'||foodLevel>6);const speed=(sprinting?10:5.4)*Math.max(.1,1+(effectLevel('speed')+1)*.2-(effectLevel('slowness')+1)*.15);const dx=(Math.sin(yaw)*forward+Math.cos(yaw)*strafe)*speed*dt/length;const dz=(-Math.cos(yaw)*forward+Math.sin(yaw)*strafe)*speed*dt/length;
     updateHunger(dt,!!(forward||strafe),sprinting);
     playerDamageCooldown=Math.max(0,playerDamageCooldown-dt);
     mobs.update(dt,now/1000,location,(amount)=>{
@@ -1733,5 +1828,5 @@ function animate(now){requestAnimationFrame(animate);const dt=Math.min((now-last
       }
     }
     location.y=clamp(location.y,1.8,110);camera.position.set(location.x,location.y,location.z);camera.rotation.set(pitch,yaw,0,'YXZ');updateChunks();blockLighting.update(location,getBlock);updateRain(dt);skyClouds.position.x+=dt*.35;waterSurface.update(now*.001);water.material.opacity=.70+Math.sin(now*.0018)*.04;if(reflectedWater){reflectedWater.visible=location.y>SEA+.2;water.visible=!reflectedWater.visible;reflectedWater.material.uniforms.time.value=now*.001}second+=dt;frames++;if(second>.5){fps=Math.round(frames/second);second=0;frames=0;$('#coords').innerHTML=`${worldName}<br>XYZ ${location.x.toFixed(1)} / ${location.y.toFixed(1)} / ${location.z.toFixed(1)}<br>FPS ${fps} · ${mode} · Seed ${seed64}`}}renderer.render(scene,camera)}
-window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});requestAnimationFrame(animate);
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});initializeTitlePreview();requestAnimationFrame(animate);
 window.addEventListener('beforeunload',saveData);

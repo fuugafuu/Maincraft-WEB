@@ -162,3 +162,21 @@ html,body,#app,#game{overscroll-behavior:none}
 #inventory .itemcount{padding:4px 0}
 #inventory .creative-pages{margin-top:4px}
 #inventory #itemsearch{margin:6px 0}
+.creative-tabs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:3px;margin:7px 0 9px}
+.creative-tabs button{min-height:31px;background:#999;border:2px solid #555;border-top-color:#ddd;border-left-color:#ddd;color:#202020;font:11px Arial,'Noto Sans JP',sans-serif;padding:3px 2px;cursor:pointer;image-rendering:pixelated;overflow:hidden}
+.creative-tabs button.active{background:#e5e5e5;border-bottom-color:#e5e5e5;font-weight:bold}
+.creative-tabs button:hover,.creative-tabs button:focus-visible{background:#eee;outline:1px solid #333}
+@media(max-width:480px){.creative-tabs{grid-template-columns:repeat(4,minmax(0,1fr))}.creative-tabs button{font-size:10px;min-height:27px}}
+.creative-hotbar{border-top:2px solid #818181;margin-top:10px;padding-top:6px}
+.creative-cursor{font:11px Arial,'Noto Sans JP',sans-serif;min-height:15px;color:#292929;text-align:center;margin-bottom:4px}
+.creative-hotbar-row{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:2px}
+.creative-hotbar-slot{position:relative;aspect-ratio:1;min-width:0;padding:2px;background:#8b8b8b;border:2px solid #545454;border-top-color:#333;border-left-color:#333;image-rendering:pixelated;display:grid;place-items:center}
+.creative-hotbar-slot.selected{outline:2px solid #f4f4f4;outline-offset:-1px;background:#aaa}
+.creative-hotbar-slot i{display:block;width:75%;height:75%;background-size:contain;background-position:center;background-repeat:no-repeat;image-rendering:pixelated}
+.creative-hotbar-slot small{position:absolute;bottom:0;right:2px;color:#fff;font:9px Arial;text-shadow:1px 1px black}
+.creative-hotbar-actions{display:flex;align-items:center;justify-content:space-between;font:10px Arial,'Noto Sans JP',sans-serif;color:#444;margin-top:6px;gap:5px}
+.creative-hotbar-actions button{font:11px Arial,'Noto Sans JP',sans-serif;padding:4px 7px;background:#888;color:white;border:2px solid #444}
+.creative-hotbar-actions button:disabled{opacity:.45}
+/* The Java client JAR may only contain a 1×1 panorama placeholder. The
+   live terrain preview provides a usable scene behind the title instead. */
+#menu.preview-ready{background:linear-gradient(180deg,#06122225,#050910b0)!important}
